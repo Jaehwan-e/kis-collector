@@ -6,9 +6,9 @@ import logging
 
 import aiohttp
 
-from auth import AuthManager
-from config import settings
-from db import Database
+from .auth import AuthManager
+from .config import settings
+from .db import Database
 
 logger = logging.getLogger(__name__)
 

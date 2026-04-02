@@ -159,40 +159,40 @@ source .venv/bin/activate
 ### 디버깅 (포그라운드, DEBUG 로그)
 
 ```bash
-LOG_LEVEL=DEBUG python main.py
+LOG_LEVEL=DEBUG python run.py
 ```
 
 ### 실제 운영 (포그라운드)
 
 ```bash
-python main.py
+python run.py
 ```
 
 ### 백그라운드 운영 (로그 파일 저장)
 
 ```bash
-nohup python main.py > logs/realtime.log 2>&1 &
+nohup python run.py > logs/realtime.log 2>&1 &
 
 # 로그 실시간 확인
 tail -f logs/realtime.log
 
 # 프로세스 확인
-ps aux | grep "python main.py"
+ps aux | grep "python run.py"
 
 # 종료 (SIGTERM → graceful shutdown)
-kill $(pgrep -f "python main.py")
+kill $(pgrep -f "python run.py")
 ```
 
 ### 테스트
 
 ```bash
-python test.py all          # 전체
-python test.py parser       # 파서 (오프라인)
-python test.py db           # DB 연결 + INSERT
-python test.py auth         # 토큰 발급 + 캐싱
-python test.py holiday      # 휴장일 조회
-python test.py daily_base   # 일별 시세 조회
-python test.py ws           # WebSocket 10초 (장중에만 유효)
+python -m tests.test all          # 전체
+python -m tests.test parser       # 파서 (오프라인)
+python -m tests.test db           # DB 연결 + INSERT
+python -m tests.test auth         # 토큰 발급 + 캐싱
+python -m tests.test holiday      # 휴장일 조회
+python -m tests.test daily_base   # 일별 시세 조회
+python -m tests.test ws           # WebSocket 10초 (장중에만 유효)
 ```
 
 ### DB 확인

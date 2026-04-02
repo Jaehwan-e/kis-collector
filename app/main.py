@@ -3,11 +3,11 @@ import datetime
 import logging
 import signal
 
-from auth import AuthManager
-from config import settings
-from db import Database
-from rest import RESTPoller
-from ws import WSClient
+from .auth import AuthManager
+from .config import settings
+from .db import Database
+from .rest import RESTPoller
+from .ws import WSClient
 
 logger = logging.getLogger(__name__)
 

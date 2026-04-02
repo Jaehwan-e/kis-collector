@@ -4,10 +4,10 @@ import logging
 
 import websockets
 
-from auth import AuthManager
-from config import settings
-from db import Database
-from parser import parse_message
+from .auth import AuthManager
+from .config import settings
+from .db import Database
+from .parser import parse_message
 
 logger = logging.getLogger(__name__)
 

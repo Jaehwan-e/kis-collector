@@ -31,7 +31,7 @@ logger = logging.getLogger("test")
 # 1. parser 테스트 (오프라인, API 호출 없음)
 # ============================================================
 def test_parser():
-    from parser import parse_message, TRADE_FIELDS, ORDERBOOK_FIELDS
+    from app.parser import parse_message, TRADE_FIELDS, ORDERBOOK_FIELDS
 
     logger.info("=== parser 테스트 시작 ===")
 
@@ -100,7 +100,7 @@ def test_parser():
 # 2. DB 테스트 (로컬 PostgreSQL 필요)
 # ============================================================
 async def test_db():
-    from db import Database
+    from app.db import Database
 
     logger.info("=== DB 테스트 시작 ===")
     db = Database()
@@ -189,7 +189,7 @@ async def test_db():
 # 3. 토큰 발급 테스트 (KIS API 호출)
 # ============================================================
 async def test_auth():
-    from auth import AuthManager
+    from app.auth import AuthManager
 
     logger.info("=== auth 테스트 시작 ===")
     auth = AuthManager()
@@ -215,9 +215,9 @@ async def test_auth():
 # 4. 휴장일 조회 테스트 (KIS API 호출)
 # ============================================================
 async def test_holiday():
-    from auth import AuthManager
-    from db import Database
-    from rest import RESTPoller
+    from app.auth import AuthManager
+    from app.db import Database
+    from app.rest import RESTPoller
 
     logger.info("=== 휴장일 조회 테스트 시작 ===")
     auth = AuthManager()
@@ -249,9 +249,9 @@ async def test_holiday():
 # 5. daily_base 조회 + DB 저장 테스트 (KIS API 호출)
 # ============================================================
 async def test_daily_base():
-    from auth import AuthManager
-    from db import Database
-    from rest import RESTPoller
+    from app.auth import AuthManager
+    from app.db import Database
+    from app.rest import RESTPoller
 
     logger.info("=== daily_base 테스트 시작 ===")
     auth = AuthManager()
@@ -291,9 +291,9 @@ async def test_daily_base():
 # 6. WebSocket 10초 연결 테스트 (KIS API 호출)
 # ============================================================
 async def test_ws():
-    from auth import AuthManager
-    from db import Database
-    from ws import WSClient
+    from app.auth import AuthManager
+    from app.db import Database
+    from app.ws import WSClient
 
     logger.info("=== WebSocket 테스트 시작 (10초) ===")
     auth = AuthManager()

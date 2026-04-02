@@ -7,11 +7,11 @@ import time
 
 import aiohttp
 
-from config import settings
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
-TOKEN_FILE = os.path.join(os.path.dirname(__file__), ".tokens.json")
+TOKEN_FILE = os.path.join(os.path.dirname(__file__), os.pardir, ".tokens.json")
 
 
 class AuthManager:
