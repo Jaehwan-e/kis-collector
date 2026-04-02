@@ -163,6 +163,13 @@ def parse_message(raw: str) -> dict | None:
         return None
 
 
+def _safe_int(val: str) -> int:
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return 0
+
+
 def _parse_trade(fields: list[str]) -> dict | None:
     if len(fields) < len(TRADE_FIELDS):
         logger.warning("체결 필드 수 부족: %d < %d", len(fields), len(TRADE_FIELDS))
@@ -170,21 +177,25 @@ def _parse_trade(fields: list[str]) -> dict | None:
 
     raw = {name: fields[i] for i, name in enumerate(TRADE_FIELDS)}
 
-    return {
-        "_type": "trade",
-        "symbol": raw["mksc_shrn_iscd"],
-        "cntg_hour": raw["stck_cntg_hour"],
-        "price": int(raw["stck_prpr"]),
-        "volume": int(raw["cntg_vol"]),
-        "trade_dir": raw["ccld_dvsn"],
-        "ask1": int(raw["askp1"]),
-        "bid1": int(raw["bidp1"]),
-        "ask1_qty": int(raw["askp_rsqn1"]),
-        "bid1_qty": int(raw["bidp_rsqn1"]),
-        "mkop_code": raw["new_mkop_cls_code"],
-        "hour_cls": raw["hour_cls_code"],
-        "vi_std_price": int(raw["vi_stnd_prc"]),
-    }
+    try:
+        return {
+            "_type": "trade",
+            "symbol": raw["mksc_shrn_iscd"],
+            "cntg_hour": raw["stck_cntg_hour"],
+            "price": _safe_int(raw["stck_prpr"]),
+            "volume": _safe_int(raw["cntg_vol"]),
+            "trade_dir": raw["ccld_dvsn"],
+            "ask1": _safe_int(raw["askp1"]),
+            "bid1": _safe_int(raw["bidp1"]),
+            "ask1_qty": _safe_int(raw["askp_rsqn1"]),
+            "bid1_qty": _safe_int(raw["bidp_rsqn1"]),
+            "mkop_code": raw["new_mkop_cls_code"],
+            "hour_cls": raw["hour_cls_code"],
+            "vi_std_price": _safe_int(raw["vi_stnd_prc"]),
+        }
+    except Exception:
+        logger.warning("체결 파싱 실패: %s", raw.get("mksc_shrn_iscd", "?"))
+        return None
 
 
 def _parse_orderbook(fields: list[str]) -> dict | None:
@@ -194,13 +205,17 @@ def _parse_orderbook(fields: list[str]) -> dict | None:
 
     raw = {name: fields[i] for i, name in enumerate(ORDERBOOK_FIELDS)}
 
-    return {
-        "_type": "orderbook",
-        "symbol": raw["mksc_shrn_iscd"],
-        "bsop_hour": raw["bsop_hour"],
-        "hour_cls": raw["hour_cls_code"],
-        "ask_prices": [int(raw[f"askp{i}"]) for i in range(1, 11)],
-        "bid_prices": [int(raw[f"bidp{i}"]) for i in range(1, 11)],
-        "ask_qtys": [int(raw[f"askp_rsqn{i}"]) for i in range(1, 11)],
-        "bid_qtys": [int(raw[f"bidp_rsqn{i}"]) for i in range(1, 11)],
-    }
+    try:
+        return {
+            "_type": "orderbook",
+            "symbol": raw["mksc_shrn_iscd"],
+            "bsop_hour": raw["bsop_hour"],
+            "hour_cls": raw["hour_cls_code"],
+            "ask_prices": [_safe_int(raw[f"askp{i}"]) for i in range(1, 11)],
+            "bid_prices": [_safe_int(raw[f"bidp{i}"]) for i in range(1, 11)],
+            "ask_qtys": [_safe_int(raw[f"askp_rsqn{i}"]) for i in range(1, 11)],
+            "bid_qtys": [_safe_int(raw[f"bidp_rsqn{i}"]) for i in range(1, 11)],
+        }
+    except Exception:
+        logger.warning("호가 파싱 실패: %s", raw.get("mksc_shrn_iscd", "?"))
+        return None

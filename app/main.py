@@ -4,6 +4,8 @@ import logging
 import signal
 
 from .auth import AuthManager
+from .backup import run_backup_all
+from .bot import bot
 from .config import settings
 from .db import Database
 from . import notify
@@ -106,6 +108,11 @@ async def _run_market_session(db: Database, auth: AuthManager):
     stats = await _collect_daily_stats(db, start_time, end_time)
     await notify.send_daily_report(stats)
 
+    # 6) 자동 백업
+    if settings.backup_remote_list:
+        logger.info("자동 백업 시작")
+        await run_backup_all()
+
     await rest.close()
 
 
@@ -129,6 +136,8 @@ async def _collect_daily_stats(db: Database, start_time: str, end_time: str) -> 
             stats["investor_count"] = await conn.fetchval(
                 "SELECT COUNT(*) FROM rest_daily_investor WHERE trade_date >= $1",
                 datetime.date.today() - datetime.timedelta(days=1))
+            stats["db_size"] = await conn.fetchval(
+                "SELECT pg_size_pretty(pg_database_size('stock_data'))")
     except Exception:
         logger.exception("일일 통계 조회 실패")
 
@@ -156,10 +165,14 @@ async def main():
     await db.init()
     auth = AuthManager()
 
+    # 텔레그램 봇 명령어 리스너 시작
+    bot_task = asyncio.create_task(bot.run())
+
     loop = asyncio.get_running_loop()
 
     def _shutdown():
         logger.info("종료 시그널 수신")
+        bot.stop()
         for task in asyncio.all_tasks(loop):
             task.cancel()
 
@@ -183,6 +196,7 @@ async def main():
         logger.info("종료 처리 중...")
     finally:
         await notify.send_shutdown()
+        await bot.close()
         await notify.close()
         await db.close()
         await auth.close()
