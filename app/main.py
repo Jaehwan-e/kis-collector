@@ -154,11 +154,24 @@ async def _flush_loop(db: Database):
         await db.flush()
 
 
+class _KSTFormatter(logging.Formatter):
+    """로그 시간을 KST로 표시"""
+    def formatTime(self, record, datefmt=None):
+        ct = datetime.datetime.fromtimestamp(record.created, tz=KST)
+        if datefmt:
+            return ct.strftime(datefmt)
+        return ct.strftime("%Y-%m-%d %H:%M:%S")
+
+
 async def main():
+    handler = logging.StreamHandler()
+    handler.setFormatter(_KSTFormatter(
+        fmt="%(asctime)s KST %(name)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
     logging.basicConfig(
         level=getattr(logging, settings.log_level),
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[handler],
     )
 
     db = Database()
