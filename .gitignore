@@ -8,5 +8,4 @@ __pycache__/
 .vscode/
 .idea/
 .claude/
-logs/*
-!logs/.gitkeep
+logs/
