@@ -40,7 +40,6 @@ CREATE TABLE ws_orderbook (
     symbol          VARCHAR(10)   NOT NULL,   -- 종목코드
     bsop_hour       VARCHAR(10)   NOT NULL,   -- 영업 시간 (BSOP_HOUR)
     hour_cls        VARCHAR(5)    NOT NULL,   -- 시간 구분 코드
-    mkop_code       VARCHAR(10)   NOT NULL,   -- 장운영 구분 코드 (NEW_MKOP_CLS_CODE)
     -- 매도호가 가격/잔량 10단계 (배열: [1호가, 2호가, ..., 10호가])
     ask_prices      INT[10]       NOT NULL,   -- 매도호가 1~10 (ASKP1~ASKP10)
     bid_prices      INT[10]       NOT NULL,   -- 매수호가 1~10 (BIDP1~BIDP10)

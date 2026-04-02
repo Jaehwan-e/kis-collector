@@ -122,10 +122,7 @@ ORDERBOOK_FIELDS = [
     "total_bidp_rsqn_icdc",  # 55 총 매수호가 잔량 증감
     "ovtm_total_askp_icdc",  # 56 시간외 총 매도호가 잔량 증감
     "ovtm_total_bidp_icdc",  # 57 시간외 총 매수호가 잔량 증감
-    "stck_deal_cls_code",    # 58 주식 매매 구분 코드
-    "antc_cntg_prc",    # 59 예상 체결 단가
-    "new_mkop_cls_code",     # 60 장운영 구분 코드
-    "_reserved",         # 61 예비
+    "stck_deal_cls_code",    # 58 주식 매매 구분 코드 (사용X, 삭제된 값)
 ]
 
 
@@ -202,7 +199,6 @@ def _parse_orderbook(fields: list[str]) -> dict | None:
         "symbol": raw["mksc_shrn_iscd"],
         "bsop_hour": raw["bsop_hour"],
         "hour_cls": raw["hour_cls_code"],
-        "mkop_code": raw["new_mkop_cls_code"],
         "ask_prices": [int(raw[f"askp{i}"]) for i in range(1, 11)],
         "bid_prices": [int(raw[f"bidp{i}"]) for i in range(1, 11)],
         "ask_qtys": [int(raw[f"askp_rsqn{i}"]) for i in range(1, 11)],

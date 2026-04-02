@@ -17,9 +17,9 @@ TRADE_INSERT = """
 """
 
 ORDERBOOK_INSERT = """
-    INSERT INTO ws_orderbook (ts, symbol, bsop_hour, hour_cls, mkop_code,
+    INSERT INTO ws_orderbook (ts, symbol, bsop_hour, hour_cls,
         ask_prices, bid_prices, ask_qtys, bid_qtys)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 """
 
 MEMBER_INSERT = """
@@ -77,7 +77,7 @@ class Database:
     async def add_orderbook(self, rec: dict):
         ts = int(time.time() * 1000)
         row = (
-            ts, rec["symbol"], rec["bsop_hour"], rec["hour_cls"], rec["mkop_code"],
+            ts, rec["symbol"], rec["bsop_hour"], rec["hour_cls"],
             rec["ask_prices"], rec["bid_prices"], rec["ask_qtys"], rec["bid_qtys"],
         )
         async with self._lock:
@@ -107,7 +107,7 @@ class Database:
             async with self._pool.acquire() as conn:
                 await conn.executemany(ORDERBOOK_INSERT, buf)
             logger.debug("호가 %d건 저장 (마지막: %s ask1=%s bid1=%s)",
-                         len(buf), buf[-1][1], buf[-1][5][0], buf[-1][6][0])
+                         len(buf), buf[-1][1], buf[-1][4][0], buf[-1][5][0])
         except Exception:
             logger.exception("호가 저장 실패 (%d건 폐기)", len(buf))
 
