@@ -211,7 +211,7 @@ mkdir -p logs && nohup python run.py > logs/realtime.log 2>&1 &
 tail -f logs/realtime.log
 
 # 프로세스 확인
-ps aux | grep "python run.py"
+ps aux | grep "python run.py" | grep -v grep
 
 # 종료 (SIGTERM → graceful shutdown)
 kill $(pgrep -f "python run.py")
