@@ -1,0 +1,79 @@
+import asyncio
+import json
+import logging
+
+import websockets
+
+from auth import AuthManager
+from config import settings
+from db import Database
+from parser import parse_message
+
+logger = logging.getLogger(__name__)
+
+
+class WSClient:
+    def __init__(self, auth: AuthManager, db: Database):
+        self._auth = auth
+        self._db = db
+        self._stop = False
+
+    async def run(self):
+        delay = 5
+        while not self._stop:
+            try:
+                # 재접속 시 새 approval_key 발급
+                await self._auth.force_issue_approval_key()
+                approval_key = self._auth.approval_key
+
+                async with websockets.connect(
+                    settings.ws_url,
+                    ping_interval=60,
+                    ping_timeout=30,
+                    close_timeout=5,
+                ) as ws:
+                    await self._subscribe(ws, approval_key)
+                    delay = 5
+                    await self._receive_loop(ws)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.warning("WS 연결 끊김: %s / %ds 후 재접속", e, delay)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 60)
+
+        await self._db.flush()
+        logger.info("WS 클라이언트 종료")
+
+    async def _subscribe(self, ws, approval_key: str):
+        for symbol in settings.symbol_list:
+            for tr_id in ("H0STASP0", "H0STCNT0"):
+                msg = {
+                    "header": {
+                        "approval_key": approval_key,
+                        "custtype": "P",
+                        "tr_type": "1",
+                        "content-type": "utf-8",
+                    },
+                    "body": {
+                        "input": {"tr_id": tr_id, "tr_key": symbol}
+                    },
+                }
+                await ws.send(json.dumps(msg))
+                logger.info("구독 요청: %s / %s", tr_id, symbol)
+
+    async def _receive_loop(self, ws):
+        async for raw in ws:
+            if self._stop:
+                break
+            parsed = parse_message(raw)
+            if parsed is None:
+                continue
+            msg_type = parsed["_type"]
+            if msg_type == "trade":
+                await self._db.add_trade(parsed)
+            elif msg_type == "orderbook":
+                await self._db.add_orderbook(parsed)
+
+    def stop(self):
+        self._stop = True
