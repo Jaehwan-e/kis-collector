@@ -39,6 +39,12 @@ class WSClient:
                 break
             except Exception as e:
                 logger.warning("WS 연결 끊김: %s / %ds 후 재접속", e, delay)
+                from . import notify
+                from .main import _inc_ws_reconnect, _inc_error
+                _inc_ws_reconnect()
+                _inc_error()
+                if delay >= 60:
+                    await notify.send_error("WS 재접속 반복", str(e)[:200])
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 60)
 

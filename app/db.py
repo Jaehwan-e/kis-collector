@@ -95,8 +95,12 @@ class Database:
                 await conn.executemany(TRADE_INSERT, buf)
             logger.debug("체결 %d건 저장 (마지막: %s %s원 %s주)",
                          len(buf), buf[-1][1], buf[-1][3], buf[-1][4])
-        except Exception:
+        except Exception as e:
             logger.exception("체결 저장 실패 (%d건 폐기)", len(buf))
+            from . import notify
+            from .main import _inc_error
+            _inc_error()
+            await notify.send_error("체결 저장 실패", f"{len(buf)}건 폐기: {e}")
 
     async def _flush_orderbooks(self):
         if not self._orderbook_buf:
@@ -108,8 +112,12 @@ class Database:
                 await conn.executemany(ORDERBOOK_INSERT, buf)
             logger.debug("호가 %d건 저장 (마지막: %s ask1=%s bid1=%s)",
                          len(buf), buf[-1][1], buf[-1][4][0], buf[-1][5][0])
-        except Exception:
+        except Exception as e:
             logger.exception("호가 저장 실패 (%d건 폐기)", len(buf))
+            from . import notify
+            from .main import _inc_error
+            _inc_error()
+            await notify.send_error("호가 저장 실패", f"{len(buf)}건 폐기: {e}")
 
     async def flush(self):
         async with self._lock:

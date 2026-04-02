@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     rest_url: str = "https://openapi.koreainvestment.com:9443"
     log_level: str = "INFO"
     flush_interval: float = 1.0
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
 
     @property
     def symbol_list(self) -> list[str]:

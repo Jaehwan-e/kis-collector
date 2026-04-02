@@ -6,6 +6,7 @@ import signal
 from .auth import AuthManager
 from .config import settings
 from .db import Database
+from . import notify
 from .rest import RESTPoller
 from .ws import WSClient
 
@@ -19,6 +20,21 @@ WS_START = datetime.time(8, 30)     # WS + REST 시작
 WS_END = datetime.time(15, 30)      # WS + REST 종료
 POST_MARKET = datetime.time(15, 35) # daily_investor 수집
 
+# 에러 카운터
+_error_count = 0
+_ws_reconnects = 0
+_error_alert_threshold = 5
+
+
+def _inc_error():
+    global _error_count
+    _error_count += 1
+
+
+def _inc_ws_reconnect():
+    global _ws_reconnects
+    _ws_reconnects += 1
+
 
 async def _wait_until(target: datetime.time):
     """목표 시각까지 대기 — 30초 간격으로 시각 확인 (슬립 복귀 대응)"""
@@ -31,6 +47,10 @@ async def _wait_until(target: datetime.time):
 
 async def _run_market_session(db: Database, auth: AuthManager):
     """하루 장중 세션: 08:00 ~ 15:35"""
+    global _error_count, _ws_reconnects
+    _error_count = 0
+    _ws_reconnects = 0
+
     rest = RESTPoller(auth, db)
     ws = WSClient(auth, db)
 
@@ -42,8 +62,11 @@ async def _run_market_session(db: Database, auth: AuthManager):
 
     if not await rest.is_market_open():
         logger.info("오늘 휴장 — 수집 스킵")
+        await notify.send("📅 오늘 휴장 — 수집 스킵")
         await rest.close()
         return
+
+    await notify.send_startup()
 
     logger.info("일별 시세(daily_base) 수집")
     await rest.poll_daily_base()
@@ -53,6 +76,7 @@ async def _run_market_session(db: Database, auth: AuthManager):
 
     # 3) 장중: WS + REST 폴링 + 주기적 플러시
     logger.info("장중 데이터 수집 시작")
+    start_time = datetime.datetime.now(KST).strftime("%H:%M:%S")
 
     ws_task = asyncio.create_task(ws.run())
     flush_task = asyncio.create_task(_flush_loop(db))
@@ -69,6 +93,7 @@ async def _run_market_session(db: Database, auth: AuthManager):
         await asyncio.gather(*tasks, return_exceptions=True)
 
     await db.flush()
+    end_time = datetime.datetime.now(KST).strftime("%H:%M:%S")
     logger.info("장중 수집 종료, 버퍼 플러시 완료")
 
     # 4) 장 마감 후 daily_investor 수집
@@ -77,7 +102,41 @@ async def _run_market_session(db: Database, auth: AuthManager):
     logger.info("일별 투자자(daily_investor) 수집")
     await rest.poll_daily_investor()
 
+    # 5) 일일 보고
+    stats = await _collect_daily_stats(db, start_time, end_time)
+    await notify.send_daily_report(stats)
+
     await rest.close()
+
+
+async def _collect_daily_stats(db: Database, start_time: str, end_time: str) -> dict:
+    """오늘 수집된 데이터 건수 조회"""
+    today_start_ms = int(
+        datetime.datetime.now(KST).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000
+    )
+    stats = {}
+    try:
+        async with db._pool.acquire() as conn:
+            stats["trade_count"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM ws_trade WHERE ts >= $1", today_start_ms)
+            stats["orderbook_count"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM ws_orderbook WHERE ts >= $1", today_start_ms)
+            stats["member_count"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM rest_member WHERE ts >= $1", today_start_ms)
+            stats["daily_base_count"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM rest_daily_base WHERE trade_date = $1",
+                datetime.date.today())
+            stats["investor_count"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM rest_daily_investor WHERE trade_date >= $1",
+                datetime.date.today() - datetime.timedelta(days=1))
+    except Exception:
+        logger.exception("일일 통계 조회 실패")
+
+    stats["ws_reconnects"] = _ws_reconnects
+    stats["error_count"] = _error_count
+    stats["start_time"] = start_time
+    stats["end_time"] = end_time
+    return stats
 
 
 async def _flush_loop(db: Database):
@@ -97,14 +156,10 @@ async def main():
     await db.init()
     auth = AuthManager()
 
-    # 모든 실행 중인 태스크를 추적
-    _all_tasks: list[asyncio.Task] = []
-
     loop = asyncio.get_running_loop()
 
     def _shutdown():
         logger.info("종료 시그널 수신")
-        # 현재 이벤트 루프의 모든 태스크 취소
         for task in asyncio.all_tasks(loop):
             task.cancel()
 
@@ -127,6 +182,8 @@ async def main():
     except asyncio.CancelledError:
         logger.info("종료 처리 중...")
     finally:
+        await notify.send_shutdown()
+        await notify.close()
         await db.close()
         await auth.close()
         logger.info("프로그램 종료")
