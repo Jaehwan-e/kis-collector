@@ -123,15 +123,23 @@ async def cmd_status():
     # 계정별 수집 현황
     for name, s in all_st.items():
         lines.append(f"<b>[{name}]</b>")
-        lines.append(f"  체결: {s.trade_count:,} | 호가: {s.orderbook_count:,}")
-        lines.append(f"  회원사: {s.member_count:,} | 시세: {s.daily_base_count:,} | 투자자: {s.investor_count:,}")
-        lines.append(f"  WS재접속: {s.ws_reconnects} | 에러: {s.errors}")
+        lines.append(f"  체결: {s.trade_count:,}")
+        lines.append(f"  호가: {s.orderbook_count:,}")
+        lines.append(f"  회원사: {s.member_count:,}")
+        lines.append(f"  시세: {s.daily_base_count:,}")
+        lines.append(f"  투자자: {s.investor_count:,}")
+        lines.append(f"  WS재접속: {s.ws_reconnects}")
+        lines.append(f"  에러: {s.errors}")
 
     # 합계
     lines.append(f"\n<b>합계</b>")
-    lines.append(f"  체결: {t.trade_count:,} | 호가: {t.orderbook_count:,}")
-    lines.append(f"  회원사: {t.member_count:,} | 시세: {t.daily_base_count:,} | 투자자: {t.investor_count:,}")
-    lines.append(f"  WS재접속: {t.ws_reconnects} | 에러: {t.errors}")
+    lines.append(f"  체결: {t.trade_count:,}")
+    lines.append(f"  호가: {t.orderbook_count:,}")
+    lines.append(f"  회원사: {t.member_count:,}")
+    lines.append(f"  시세: {t.daily_base_count:,}")
+    lines.append(f"  투자자: {t.investor_count:,}")
+    lines.append(f"  WS재접속: {t.ws_reconnects}")
+    lines.append(f"  에러: {t.errors}")
 
     lines.append(f"\n<b>저장공간</b>")
     lines.append(f"  디스크: {disk}")

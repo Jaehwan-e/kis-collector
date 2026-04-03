@@ -50,14 +50,22 @@ async def send_daily_report(daily_stats: dict):
 
     for name, s in all_st.items():
         lines.append(f"<b>[{name}]</b>")
-        lines.append(f"  체결: {s.trade_count:,} | 호가: {s.orderbook_count:,}")
-        lines.append(f"  회원사: {s.member_count:,} | 시세: {s.daily_base_count:,} | 투자자: {s.investor_count:,}")
-        lines.append(f"  WS재접속: {s.ws_reconnects} | 에러: {s.errors}")
+        lines.append(f"  체결: {s.trade_count:,}")
+        lines.append(f"  호가: {s.orderbook_count:,}")
+        lines.append(f"  회원사: {s.member_count:,}")
+        lines.append(f"  시세: {s.daily_base_count:,}")
+        lines.append(f"  투자자: {s.investor_count:,}")
+        lines.append(f"  WS재접속: {s.ws_reconnects}")
+        lines.append(f"  에러: {s.errors}")
 
     lines.append(f"\n<b>합계</b>")
-    lines.append(f"  체결: <b>{t.trade_count:,}</b> | 호가: <b>{t.orderbook_count:,}</b>")
-    lines.append(f"  회원사: <b>{t.member_count:,}</b> | 시세: <b>{t.daily_base_count:,}</b> | 투자자: <b>{t.investor_count:,}</b>")
-    lines.append(f"  WS재접속: <b>{t.ws_reconnects}</b> | 에러: <b>{t.errors}</b>")
+    lines.append(f"  체결: <b>{t.trade_count:,}</b>")
+    lines.append(f"  호가: <b>{t.orderbook_count:,}</b>")
+    lines.append(f"  회원사: <b>{t.member_count:,}</b>")
+    lines.append(f"  시세: <b>{t.daily_base_count:,}</b>")
+    lines.append(f"  투자자: <b>{t.investor_count:,}</b>")
+    lines.append(f"  WS재접속: <b>{t.ws_reconnects}</b>")
+    lines.append(f"  에러: <b>{t.errors}</b>")
 
     lines.append(f"\nDB 용량: <b>{daily_stats.get('db_size', '?')}</b>")
     lines.append(f"디스크: <b>{disk}</b>")
