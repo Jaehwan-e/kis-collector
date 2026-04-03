@@ -52,6 +52,8 @@ async def send_daily_report(stats: dict):
         f"디스크: <b>{disk}</b>\n\n"
         f"WS 재접속: <b>{stats.get('ws_reconnects', 0)}</b>회\n"
         f"에러: <b>{stats.get('error_count', 0)}</b>건\n\n"
+        f"계정: <b>{stats.get('account_count', 1)}</b>개"
+        f" | 종목: <b>{stats.get('total_symbols', '?')}</b>개\n"
         f"수집 시간: {stats.get('start_time', '')} ~ {stats.get('end_time', '')}"
     )
     await send(text)
@@ -81,13 +83,24 @@ async def send_error(error_type: str, detail: str):
 
 
 async def send_startup():
-    """시작 알림"""
+    """시작 알림 (싱글 계정)"""
     now = datetime.datetime.now(KST)
     text = (
         f"🟢 <b>수집 시작</b> ({now:%Y-%m-%d %H:%M})\n"
         f"종목: {len(settings.symbol_list)}개"
     )
     await send(text)
+
+
+async def send_startup_multi(accounts):
+    """시작 알림 (멀티 계정)"""
+    now = datetime.datetime.now(KST)
+    total = sum(len(a.symbols) for a in accounts)
+    lines = [f"🟢 <b>수집 시작</b> ({now:%Y-%m-%d %H:%M})\n"]
+    lines.append(f"계정: {len(accounts)}개 | 종목: {total}개\n")
+    for acc in accounts:
+        lines.append(f"  [{acc.name}] {len(acc.symbols)}종목")
+    await send("\n".join(lines))
 
 
 async def send_shutdown():

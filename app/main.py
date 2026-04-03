@@ -6,7 +6,7 @@ import signal
 from .auth import AuthManager
 from .backup import run_backup_all
 from .bot import bot
-from .config import settings
+from .config import AccountConfig, settings
 from .db import Database
 from . import notify
 from .rest import RESTPoller
@@ -47,73 +47,121 @@ async def _wait_until(target: datetime.time):
         await asyncio.sleep(30)
 
 
-async def _run_market_session(db: Database, auth: AuthManager):
-    """하루 장중 세션: 08:00 ~ 15:35"""
-    global _error_count, _ws_reconnects
-    _error_count = 0
-    _ws_reconnects = 0
+async def _run_account_session(account: AccountConfig, db: Database):
+    """계정 하나의 장중 세션: WS + REST 동시 실행"""
+    name = account.name
+    auth = AuthManager(account)
+
+    logger.info("[%s] 토큰 발급 (%d종목)", name, len(account.symbols))
+    await auth.ensure_tokens()
 
     rest = RESTPoller(auth, db)
     ws = WSClient(auth, db)
 
-    # 1) 장 시작 전: 토큰 발급 + 휴장일 체크 + daily_base 수집
+    try:
+        # 장 시작 전 daily_base 수집
+        logger.info("[%s] 일별 시세(daily_base) 수집", name)
+        await rest.poll_daily_base()
+
+        # WS 시작 시간 대기
+        await _wait_until(WS_START)
+
+        # 장중: WS + REST 폴링
+        logger.info("[%s] 장중 데이터 수집 시작", name)
+        ws_task = asyncio.create_task(ws.run())
+        rest_task = asyncio.create_task(rest.poll_member())
+
+        try:
+            await _wait_until(WS_END)
+        finally:
+            ws.stop()
+            ws_task.cancel()
+            rest_task.cancel()
+            await asyncio.gather(ws_task, rest_task, return_exceptions=True)
+
+        # 장 마감 후 daily_investor 수집
+        await _wait_until(POST_MARKET)
+        logger.info("[%s] 일별 투자자(daily_investor) 수집", name)
+        await rest.poll_daily_investor()
+
+    except asyncio.CancelledError:
+        ws.stop()
+        raise
+    finally:
+        await rest.close()
+        await auth.close()
+
+
+async def _run_market_session(db: Database):
+    """하루 장중 세션: 모든 계정 동시 실행"""
+    global _error_count, _ws_reconnects
+    _error_count = 0
+    _ws_reconnects = 0
+
+    accounts = settings.account_list
+    total_symbols = sum(len(a.symbols) for a in accounts)
+
+    # 1) 장 시작 전: 휴장일 체크 (첫 번째 계정으로 1회)
     await _wait_until(PRE_MARKET)
 
-    logger.info("토큰 발급")
-    await auth.ensure_tokens()
+    first_auth = AuthManager(accounts[0])
+    await first_auth.ensure_tokens()
+    first_rest = RESTPoller(first_auth, db)
 
-    if not await rest.is_market_open():
+    if not await first_rest.is_market_open():
         logger.info("오늘 휴장 — 수집 스킵")
         await notify.send("📅 오늘 휴장 — 수집 스킵")
-        await rest.close()
+        await first_rest.close()
+        await first_auth.close()
         return
 
-    await notify.send_startup()
+    await first_rest.close()
+    await first_auth.close()
 
-    logger.info("일별 시세(daily_base) 수집")
-    await rest.poll_daily_base()
+    if settings.is_multi_account:
+        await notify.send_startup_multi(accounts)
+    else:
+        await notify.send_startup()
 
-    # 2) WS 시작 시간 대기
-    await _wait_until(WS_START)
-
-    # 3) 장중: WS + REST 폴링 + 주기적 플러시
-    logger.info("장중 데이터 수집 시작")
     start_time = datetime.datetime.now(KST).strftime("%H:%M:%S")
 
-    ws_task = asyncio.create_task(ws.run())
+    # 2) flush 루프 (공유 DB)
     flush_task = asyncio.create_task(_flush_loop(db))
-    rest_task = asyncio.create_task(rest.poll_member())
 
-    tasks = [ws_task, flush_task, rest_task]
+    # 3) 계정별 세션 동시 실행
+    account_tasks = [
+        asyncio.create_task(_run_account_session(acc, db))
+        for acc in accounts
+    ]
 
     try:
-        await _wait_until(WS_END)
-    finally:
-        ws.stop()
-        for t in tasks:
+        await asyncio.gather(*account_tasks)
+    except asyncio.CancelledError:
+        for t in account_tasks:
             t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*account_tasks, return_exceptions=True)
+        raise
+    finally:
+        flush_task.cancel()
+        try:
+            await flush_task
+        except asyncio.CancelledError:
+            pass
+        await db.flush()
 
-    await db.flush()
     end_time = datetime.datetime.now(KST).strftime("%H:%M:%S")
     logger.info("장중 수집 종료, 버퍼 플러시 완료")
 
-    # 4) 장 마감 후 daily_investor 수집
-    await _wait_until(POST_MARKET)
-
-    logger.info("일별 투자자(daily_investor) 수집")
-    await rest.poll_daily_investor()
-
-    # 5) 일일 보고
+    # 4) 일일 보고
     stats = await _collect_daily_stats(db, start_time, end_time)
+    stats["account_count"] = len(accounts)
+    stats["total_symbols"] = total_symbols
     await notify.send_daily_report(stats)
 
-    # 6) 자동 백업
+    # 5) 자동 백업
     if settings.backup_remote_list:
         logger.info("자동 백업 시작")
         await run_backup_all()
-
-    await rest.close()
 
 
 async def _collect_daily_stats(db: Database, start_time: str, end_time: str) -> dict:
@@ -174,9 +222,15 @@ async def main():
         handlers=[handler],
     )
 
+    accounts = settings.account_list
+    total_symbols = sum(len(a.symbols) for a in accounts)
+    logger.info("시작: %d계정, %d종목", len(accounts), total_symbols)
+    for acc in accounts:
+        logger.info("  [%s] %d종목: %s", acc.name, len(acc.symbols),
+                     ",".join(acc.symbols[:5]) + ("..." if len(acc.symbols) > 5 else ""))
+
     db = Database()
     await db.init()
-    auth = AuthManager()
 
     # 텔레그램 봇 명령어 리스너 시작
     bot_task = asyncio.create_task(bot.run())
@@ -204,7 +258,7 @@ async def main():
                     await asyncio.sleep(30)
                 continue
 
-            await _run_market_session(db, auth)
+            await _run_market_session(db)
     except asyncio.CancelledError:
         logger.info("종료 처리 중...")
     finally:
@@ -212,7 +266,6 @@ async def main():
         await bot.close()
         await notify.close()
         await db.close()
-        await auth.close()
         logger.info("프로그램 종료")
 
 

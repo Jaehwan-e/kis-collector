@@ -123,9 +123,13 @@ async def cmd_status():
     from app.notify import _get_disk_usage
     disk = _get_disk_usage()
 
+    accounts = settings.account_list
+    total_symbols = sum(len(a.symbols) for a in accounts)
+
     text = (
         f"📋 <b>현재 상태</b> ({now:%H:%M:%S})\n\n"
         f"<b>수집</b>\n"
+        f"  계정: {len(accounts)}개 | 종목: {total_symbols}개\n"
         f"  에러: {_error_count}건\n"
         f"  WS 재접속: {_ws_reconnects}회\n\n"
         f"<b>저장공간</b>\n"

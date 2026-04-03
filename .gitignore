@@ -1,5 +1,6 @@
 .env
 .tokens.json
+.tokens_*.json
 .backup_state.json
 .venv/
 __pycache__/

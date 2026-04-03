@@ -19,6 +19,9 @@ class RESTPoller:
     def __init__(self, auth: AuthManager, db: Database):
         self._auth = auth
         self._db = db
+        self._account = auth.account
+        self._name = auth.account.name
+        self._symbols = auth.account.symbols
         self._session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -32,8 +35,8 @@ class RESTPoller:
         headers = {
             "content-type": "application/json; charset=utf-8",
             "authorization": f"Bearer {token}",
-            "appkey": settings.app_key,
-            "appsecret": settings.app_secret,
+            "appkey": self._account.app_key,
+            "appsecret": self._account.app_secret,
             "tr_id": tr_id,
         }
         url = f"{settings.rest_url}{path}"
@@ -81,7 +84,7 @@ class RESTPoller:
             if now >= market_end:
                 break
 
-            for symbol in settings.symbol_list:
+            for symbol in self._symbols:
                 try:
                     data = await self._request(
                         "/uapi/domestic-stock/v1/quotations/inquire-member",
@@ -102,18 +105,18 @@ class RESTPoller:
                         "glob_net_qty": int(out.get("glob_ntby_qty") or 0),
                     }
                     await self._db.insert_member(rec)
-                    logger.debug("회원사 저장: %s sell=%s buy=%s glob=%d/%d/%d",
-                                 symbol, sell_qtys, buy_qtys,
+                    logger.debug("[%s] 회원사 저장: %s sell=%s buy=%s glob=%d/%d/%d",
+                                 self._name, symbol, sell_qtys, buy_qtys,
                                  rec["glob_sell_qty"], rec["glob_buy_qty"], rec["glob_net_qty"])
                 except Exception:
-                    logger.exception("회원사 폴링 실패: %s", symbol)
+                    logger.exception("[%s] 회원사 폴링 실패: %s", self._name, symbol)
 
             await asyncio.sleep(30)
 
     # -- 장 시작 전 시세 (FHKST01010100) --
 
     async def poll_daily_base(self):
-        for symbol in settings.symbol_list:
+        for symbol in self._symbols:
             try:
                 data = await self._request(
                     "/uapi/domestic-stock/v1/quotations/inquire-price",
@@ -134,16 +137,16 @@ class RESTPoller:
                     "status_code": out.get("iscd_stat_cls_code", "000"),
                 }
                 await self._db.insert_daily_base(rec)
-                logger.info("일별 시세 저장: %s 기준=%d 상한=%d 하한=%d 호가단위=%d 상장주수=%d",
-                            symbol, rec["base_price"], rec["upper_limit"],
+                logger.info("[%s] 일별 시세 저장: %s 기준=%d 상한=%d 하한=%d 호가단위=%d 상장주수=%d",
+                            self._name, symbol, rec["base_price"], rec["upper_limit"],
                             rec["lower_limit"], rec["tick_unit"], rec["listed_shares"])
             except Exception:
-                logger.exception("일별 시세 실패: %s", symbol)
+                logger.exception("[%s] 일별 시세 실패: %s", self._name, symbol)
 
     # -- 장 마감 후 투자자 (FHKST01010900) --
 
     async def poll_daily_investor(self):
-        for symbol in settings.symbol_list:
+        for symbol in self._symbols:
             try:
                 data = await self._request(
                     "/uapi/domestic-stock/v1/quotations/inquire-investor",
@@ -173,11 +176,11 @@ class RESTPoller:
                     "orgn_net_qty": int(row.get("orgn_ntby_qty") or 0),
                 }
                 await self._db.insert_daily_investor(rec)
-                logger.info("일별 투자자 저장: %s [%s] 개인=%d 외인=%d 기관=%d",
-                            symbol, rec["trade_date"], rec["prsn_net_qty"],
+                logger.info("[%s] 일별 투자자 저장: %s [%s] 개인=%d 외인=%d 기관=%d",
+                            self._name, symbol, rec["trade_date"], rec["prsn_net_qty"],
                             rec["frgn_net_qty"], rec["orgn_net_qty"])
             except Exception:
-                logger.exception("일별 투자자 실패: %s", symbol)
+                logger.exception("[%s] 일별 투자자 실패: %s", self._name, symbol)
 
     async def close(self):
         if self._session and not self._session.closed:

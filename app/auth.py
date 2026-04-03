@@ -7,37 +7,43 @@ import time
 
 import aiohttp
 
-from .config import settings
+from .config import AccountConfig, settings
 
 logger = logging.getLogger(__name__)
 
-TOKEN_FILE = os.path.join(os.path.dirname(__file__), os.pardir, ".tokens.json")
+TOKEN_DIR = os.path.join(os.path.dirname(__file__), os.pardir)
 
 
 class AuthManager:
     """한국투자증권 인증 관리 — 파일 캐싱 + 만료 시 자동 재발급"""
 
-    def __init__(self):
+    def __init__(self, account: AccountConfig):
+        self._account = account
         self._approval_key: str | None = None
         self._approval_expires: float = 0
         self._access_token: str | None = None
         self._access_expires: float = 0
         self._session: aiohttp.ClientSession | None = None
+        self._token_file = os.path.join(TOKEN_DIR, f".tokens_{account.name}.json")
         self._load_from_file()
 
+    @property
+    def account(self) -> AccountConfig:
+        return self._account
+
     def _load_from_file(self):
-        if not os.path.exists(TOKEN_FILE):
+        if not os.path.exists(self._token_file):
             return
         try:
-            with open(TOKEN_FILE) as f:
+            with open(self._token_file) as f:
                 data = json.load(f)
             self._approval_key = data.get("approval_key")
             self._approval_expires = data.get("approval_expires", 0)
             self._access_token = data.get("access_token")
             self._access_expires = data.get("access_expires", 0)
-            logger.info("토큰 파일 로드 완료")
+            logger.info("[%s] 토큰 파일 로드 완료", self._account.name)
         except Exception:
-            logger.warning("토큰 파일 로드 실패, 새로 발급합니다")
+            logger.warning("[%s] 토큰 파일 로드 실패, 새로 발급합니다", self._account.name)
 
     def _save_to_file(self):
         data = {
@@ -46,7 +52,7 @@ class AuthManager:
             "access_token": self._access_token,
             "access_expires": self._access_expires,
         }
-        with open(TOKEN_FILE, "w") as f:
+        with open(self._token_file, "w") as f:
             json.dump(data, f)
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -80,8 +86,8 @@ class AuthManager:
         url = f"{settings.rest_url}/oauth2/Approval"
         body = {
             "grant_type": "client_credentials",
-            "appkey": settings.app_key,
-            "secretkey": settings.app_secret,
+            "appkey": self._account.app_key,
+            "secretkey": self._account.app_secret,
         }
         async with session.post(url, json=body) as resp:
             data = await resp.json()
@@ -89,17 +95,17 @@ class AuthManager:
                 self._approval_key = data["approval_key"]
                 self._approval_expires = time.time() + 24 * 3600
                 self._save_to_file()
-                logger.info("approval_key 발급 성공")
+                logger.info("[%s] approval_key 발급 성공", self._account.name)
                 return
-            raise RuntimeError(f"approval_key 발급 실패: {resp.status} {data}")
+            raise RuntimeError(f"[{self._account.name}] approval_key 발급 실패: {resp.status} {data}")
 
     async def _issue_access_token(self):
         session = await self._get_session()
         url = f"{settings.rest_url}/oauth2/tokenP"
         body = {
             "grant_type": "client_credentials",
-            "appkey": settings.app_key,
-            "appsecret": settings.app_secret,
+            "appkey": self._account.app_key,
+            "appsecret": self._account.app_secret,
         }
         async with session.post(url, json=body) as resp:
             data = await resp.json()
@@ -107,9 +113,9 @@ class AuthManager:
                 self._access_token = data["access_token"]
                 self._access_expires = time.time() + 24 * 3600
                 self._save_to_file()
-                logger.info("access_token 발급 성공")
+                logger.info("[%s] access_token 발급 성공", self._account.name)
                 return
-            raise RuntimeError(f"access_token 발급 실패: {resp.status} {data}")
+            raise RuntimeError(f"[{self._account.name}] access_token 발급 실패: {resp.status} {data}")
 
     @property
     def approval_key(self) -> str:

@@ -16,6 +16,8 @@ class WSClient:
     def __init__(self, auth: AuthManager, db: Database):
         self._auth = auth
         self._db = db
+        self._symbols = auth.account.symbols
+        self._name = auth.account.name
         self._stop = False
 
     async def run(self):
@@ -38,21 +40,21 @@ class WSClient:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.warning("WS 연결 끊김: %s / %ds 후 재접속", e, delay)
+                logger.warning("[%s] WS 연결 끊김: %s / %ds 후 재접속", self._name, e, delay)
                 from . import notify
                 from .main import _inc_ws_reconnect, _inc_error
                 _inc_ws_reconnect()
                 _inc_error()
                 if delay >= 60:
-                    await notify.send_error("WS 재접속 반복", str(e)[:200])
+                    await notify.send_error(f"[{self._name}] WS 재접속 반복", str(e)[:200])
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 60)
 
         await self._db.flush()
-        logger.info("WS 클라이언트 종료")
+        logger.info("[%s] WS 클라이언트 종료", self._name)
 
     async def _subscribe(self, ws, approval_key: str):
-        for symbol in settings.symbol_list:
+        for symbol in self._symbols:
             for tr_id in ("H0STASP0", "H0STCNT0"):
                 msg = {
                     "header": {
@@ -66,7 +68,7 @@ class WSClient:
                     },
                 }
                 await ws.send(json.dumps(msg))
-                logger.info("구독 요청: %s / %s", tr_id, symbol)
+                logger.info("[%s] 구독 요청: %s / %s", self._name, tr_id, symbol)
 
     async def _receive_loop(self, ws):
         async for raw in ws:
