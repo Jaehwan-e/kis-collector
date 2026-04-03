@@ -37,26 +37,35 @@ async def send(text: str):
         logger.exception("텔레그램 전송 실패")
 
 
-async def send_daily_report(stats: dict):
+async def send_daily_report(daily_stats: dict):
     """일일 종합 보고"""
+    from app import stats as stats_mod
+
     now = datetime.datetime.now(KST)
     disk = _get_disk_usage()
-    text = (
-        f"<b>📊 일일 수집 보고 ({now:%Y-%m-%d})</b>\n\n"
-        f"체결: <b>{stats.get('trade_count', 0):,}</b>건\n"
-        f"호가: <b>{stats.get('orderbook_count', 0):,}</b>건\n"
-        f"회원사: <b>{stats.get('member_count', 0):,}</b>건\n"
-        f"일별시세: <b>{stats.get('daily_base_count', 0):,}</b>건\n"
-        f"투자자: <b>{stats.get('investor_count', 0):,}</b>건\n\n"
-        f"DB 용량: <b>{stats.get('db_size', '?')}</b>\n"
-        f"디스크: <b>{disk}</b>\n\n"
-        f"WS 재접속: <b>{stats.get('ws_reconnects', 0)}</b>회\n"
-        f"에러: <b>{stats.get('error_count', 0)}</b>건\n\n"
-        f"계정: <b>{stats.get('account_count', 1)}</b>개"
-        f" | 종목: <b>{stats.get('total_symbols', '?')}</b>개\n"
-        f"수집 시간: {stats.get('start_time', '')} ~ {stats.get('end_time', '')}"
-    )
-    await send(text)
+    all_st = stats_mod.all_stats()
+    t = stats_mod.totals()
+
+    lines = [f"<b>📊 일일 수집 보고 ({now:%Y-%m-%d})</b>\n"]
+
+    for name, s in all_st.items():
+        lines.append(f"<b>[{name}]</b>")
+        lines.append(f"  체결: {s.trade_count:,} | 호가: {s.orderbook_count:,}")
+        lines.append(f"  회원사: {s.member_count:,} | 시세: {s.daily_base_count:,} | 투자자: {s.investor_count:,}")
+        lines.append(f"  WS재접속: {s.ws_reconnects} | 에러: {s.errors}")
+
+    lines.append(f"\n<b>합계</b>")
+    lines.append(f"  체결: <b>{t.trade_count:,}</b> | 호가: <b>{t.orderbook_count:,}</b>")
+    lines.append(f"  회원사: <b>{t.member_count:,}</b> | 시세: <b>{t.daily_base_count:,}</b> | 투자자: <b>{t.investor_count:,}</b>")
+    lines.append(f"  WS재접속: <b>{t.ws_reconnects}</b> | 에러: <b>{t.errors}</b>")
+
+    lines.append(f"\nDB 용량: <b>{daily_stats.get('db_size', '?')}</b>")
+    lines.append(f"디스크: <b>{disk}</b>")
+    lines.append(f"\n계정: <b>{daily_stats.get('account_count', 1)}</b>개"
+                 f" | 종목: <b>{daily_stats.get('total_symbols', '?')}</b>개")
+    lines.append(f"수집 시간: {daily_stats.get('start_time', '')} ~ {daily_stats.get('end_time', '')}")
+
+    await send("\n".join(lines))
 
 
 def _get_disk_usage() -> str:
