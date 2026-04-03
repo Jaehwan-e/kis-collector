@@ -137,10 +137,10 @@ async def _run_market_session(db: Database):
     logger.info("장중 수집 종료, 버퍼 플러시 완료")
 
     # 4) 일일 보고
-    stats = await _collect_daily_stats(db, start_time, end_time)
-    stats["account_count"] = len(accounts)
-    stats["total_symbols"] = total_symbols
-    await notify.send_daily_report(stats)
+    daily_stats = await _collect_daily_stats(db, start_time, end_time)
+    daily_stats["account_count"] = len(accounts)
+    daily_stats["total_symbols"] = total_symbols
+    await notify.send_daily_report(daily_stats)
 
     # 5) 자동 백업
     if settings.backup_remote_list:
