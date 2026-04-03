@@ -120,12 +120,6 @@ class Database:
             await self._flush_trades()
             await self._flush_orderbooks()
 
-    async def periodic_flush(self):
-        """FLUSH_INTERVAL 주기로 버퍼 플러시 (저유동 구간 대비)"""
-        while True:
-            await asyncio.sleep(settings.flush_interval)
-            await self.flush()
-
     # -- REST 데이터 (버퍼링 불필요, 건수 적음) --
 
     async def insert_member(self, rec: dict):

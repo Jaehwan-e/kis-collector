@@ -127,6 +127,14 @@ def get_ip_overrides() -> dict[str, str]:
 
 def _replace_host(dsn: str, new_host: str) -> str:
     parsed = urlparse(dsn)
-    # netloc = user:pass@host:port → host만 교체
-    replaced = parsed._replace(netloc=parsed.netloc.replace(parsed.hostname, new_host))
+    # netloc을 구성 요소로 분해하여 hostname만 정확히 교체
+    userinfo = ""
+    if parsed.username:
+        userinfo = parsed.username
+        if parsed.password:
+            userinfo += f":{parsed.password}"
+        userinfo += "@"
+    port = f":{parsed.port}" if parsed.port else ""
+    new_netloc = f"{userinfo}{new_host}{port}"
+    replaced = parsed._replace(netloc=new_netloc)
     return urlunparse(replaced)

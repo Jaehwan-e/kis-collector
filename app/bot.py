@@ -21,7 +21,7 @@ class TelegramBot:
         self._session: aiohttp.ClientSession | None = None
         self._offset = 0
         self._stop = False
-        self._handlers: dict[str, callable] = {}
+        self._handlers: dict[str, tuple] = {}
 
     def command(self, cmd: str, has_args: bool = False):
         """명령어 핸들러 등록 데코레이터. has_args=True면 메시지 텍스트를 인자로 전달."""
@@ -87,18 +87,6 @@ class TelegramBot:
         self.stop()
         if self._session and not self._session.closed:
             await self._session.close()
-
-
-async def _get_db_size() -> str:
-    try:
-        import asyncpg
-        from app.config import settings as s
-        conn = await asyncpg.connect(s.db_dsn, timeout=5)
-        size = await conn.fetchval("SELECT pg_size_pretty(pg_database_size('stock_data'))")
-        await conn.close()
-        return size
-    except Exception:
-        return "확인 실패"
 
 
 # 봇 인스턴스
@@ -195,8 +183,6 @@ async def cmd_setip(text: str):
     name = parts[1]
     ip = parts[2]
 
-    # 등록된 원격지인지 확인
-    known = [n for n, _ in settings.backup_remote_list]
     # 오버라이드 적용 전 원본 기준으로 확인
     base_names = []
     for entry in settings.backup_remotes.split(","):

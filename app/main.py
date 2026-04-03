@@ -120,7 +120,7 @@ async def _run_market_session(db: Database):
 
     try:
         await asyncio.gather(*account_tasks)
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, Exception):
         for t in account_tasks:
             t.cancel()
         await asyncio.gather(*account_tasks, return_exceptions=True)
