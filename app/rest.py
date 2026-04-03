@@ -122,7 +122,9 @@ class RESTPoller:
                 )
                 out = data.get("output", {})
                 rec = {
-                    "trade_date": datetime.date.today(),
+                    "trade_date": datetime.datetime.now(
+                        datetime.timezone(datetime.timedelta(hours=9))
+                    ).date(),
                     "symbol": symbol,
                     "base_price": int(out.get("stck_sdpr", 0)),
                     "upper_limit": int(out.get("stck_mxpr", 0)),
