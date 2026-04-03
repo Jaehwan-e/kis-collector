@@ -119,8 +119,14 @@ async def _run_market_session(db: Database):
     ]
 
     try:
-        await asyncio.gather(*account_tasks)
-    except (asyncio.CancelledError, Exception):
+        results = await asyncio.gather(*account_tasks, return_exceptions=True)
+        for acc, result in zip(accounts, results):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
+            elif isinstance(result, Exception):
+                logger.error("[%s] 세션 실패: %s", acc.name, result)
+                await notify.send_error(f"[{acc.name}] 세션 실패", str(result)[:200])
+    except asyncio.CancelledError:
         for t in account_tasks:
             t.cancel()
         await asyncio.gather(*account_tasks, return_exceptions=True)
