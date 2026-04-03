@@ -98,8 +98,6 @@ class Database:
         except Exception as e:
             logger.exception("체결 저장 실패 (%d건 폐기)", len(buf))
             from . import notify
-            from .main import _inc_error
-            _inc_error()
             await notify.send_error("체결 저장 실패", f"{len(buf)}건 폐기: {e}")
 
     async def _flush_orderbooks(self):
@@ -115,8 +113,6 @@ class Database:
         except Exception as e:
             logger.exception("호가 저장 실패 (%d건 폐기)", len(buf))
             from . import notify
-            from .main import _inc_error
-            _inc_error()
             await notify.send_error("호가 저장 실패", f"{len(buf)}건 폐기: {e}")
 
     async def flush(self):

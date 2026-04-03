@@ -9,6 +9,7 @@ from .bot import bot
 from .config import AccountConfig, settings
 from .db import Database
 from . import notify
+from . import stats
 from .rest import RESTPoller
 from .ws import WSClient
 
@@ -21,21 +22,6 @@ PRE_MARKET = datetime.time(8, 0)    # 토큰 발급 + 휴장일 조회 + daily_b
 WS_START = datetime.time(8, 30)     # WS + REST 시작
 WS_END = datetime.time(15, 30)      # WS + REST 종료
 POST_MARKET = datetime.time(15, 35) # daily_investor 수집
-
-# 에러 카운터
-_error_count = 0
-_ws_reconnects = 0
-_error_alert_threshold = 5
-
-
-def _inc_error():
-    global _error_count
-    _error_count += 1
-
-
-def _inc_ws_reconnect():
-    global _ws_reconnects
-    _ws_reconnects += 1
 
 
 async def _wait_until(target: datetime.time):
@@ -94,9 +80,7 @@ async def _run_account_session(account: AccountConfig, db: Database):
 
 async def _run_market_session(db: Database):
     """하루 장중 세션: 모든 계정 동시 실행"""
-    global _error_count, _ws_reconnects
-    _error_count = 0
-    _ws_reconnects = 0
+    stats.reset_all()
 
     accounts = settings.account_list
     total_symbols = sum(len(a.symbols) for a in accounts)
@@ -165,35 +149,27 @@ async def _run_market_session(db: Database):
 
 
 async def _collect_daily_stats(db: Database, start_time: str, end_time: str) -> dict:
-    """오늘 수집된 데이터 건수 조회"""
-    today_start_ms = int(
-        datetime.datetime.now(KST).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000
-    )
-    stats = {}
+    """오늘 수집된 데이터 건수 조회 (인메모리 카운터 기반)"""
+    t = stats.totals()
+    result = {
+        "trade_count": t.trade_count,
+        "orderbook_count": t.orderbook_count,
+        "member_count": t.member_count,
+        "daily_base_count": t.daily_base_count,
+        "investor_count": t.investor_count,
+        "ws_reconnects": t.ws_reconnects,
+        "error_count": t.errors,
+        "start_time": start_time,
+        "end_time": end_time,
+    }
     try:
         async with db._pool.acquire() as conn:
-            stats["trade_count"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM ws_trade WHERE ts >= $1", today_start_ms)
-            stats["orderbook_count"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM ws_orderbook WHERE ts >= $1", today_start_ms)
-            stats["member_count"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM rest_member WHERE ts >= $1", today_start_ms)
-            stats["daily_base_count"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM rest_daily_base WHERE trade_date = $1",
-                datetime.date.today())
-            stats["investor_count"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM rest_daily_investor WHERE trade_date >= $1",
-                datetime.date.today() - datetime.timedelta(days=1))
-            stats["db_size"] = await conn.fetchval(
+            result["db_size"] = await conn.fetchval(
                 "SELECT pg_size_pretty(pg_database_size('stock_data'))")
     except Exception:
-        logger.exception("일일 통계 조회 실패")
-
-    stats["ws_reconnects"] = _ws_reconnects
-    stats["error_count"] = _error_count
-    stats["start_time"] = start_time
-    stats["end_time"] = end_time
-    return stats
+        logger.exception("DB 용량 조회 실패")
+        result["db_size"] = "?"
+    return result
 
 
 async def _flush_loop(db: Database):

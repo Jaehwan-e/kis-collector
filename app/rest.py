@@ -9,6 +9,7 @@ import aiohttp
 from .auth import AuthManager
 from .config import settings
 from .db import Database
+from . import stats
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,7 @@ class RESTPoller:
                         "glob_net_qty": int(out.get("glob_ntby_qty") or 0),
                     }
                     await self._db.insert_member(rec)
+                    stats.get(self._name).member_count += 1
                     logger.debug("[%s] 회원사 저장: %s sell=%s buy=%s glob=%d/%d/%d",
                                  self._name, symbol, sell_qtys, buy_qtys,
                                  rec["glob_sell_qty"], rec["glob_buy_qty"], rec["glob_net_qty"])
@@ -137,6 +139,7 @@ class RESTPoller:
                     "status_code": out.get("iscd_stat_cls_code", "000"),
                 }
                 await self._db.insert_daily_base(rec)
+                stats.get(self._name).daily_base_count += 1
                 logger.info("[%s] 일별 시세 저장: %s 기준=%d 상한=%d 하한=%d 호가단위=%d 상장주수=%d",
                             self._name, symbol, rec["base_price"], rec["upper_limit"],
                             rec["lower_limit"], rec["tick_unit"], rec["listed_shares"])
@@ -176,6 +179,7 @@ class RESTPoller:
                     "orgn_net_qty": int(row.get("orgn_ntby_qty") or 0),
                 }
                 await self._db.insert_daily_investor(rec)
+                stats.get(self._name).investor_count += 1
                 logger.info("[%s] 일별 투자자 저장: %s [%s] 개인=%d 외인=%d 기관=%d",
                             self._name, symbol, rec["trade_date"], rec["prsn_net_qty"],
                             rec["frgn_net_qty"], rec["orgn_net_qty"])

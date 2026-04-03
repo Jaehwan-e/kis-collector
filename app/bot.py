@@ -111,7 +111,7 @@ async def cmd_backup():
 @bot.command("/status")
 async def cmd_status():
     """수집 + 백업 통합 상태"""
-    from app.main import _error_count, _ws_reconnects
+    from app import stats
     from app.backup import get_state_summary, _get_pending_dates
     now = datetime.datetime.now(KST)
     state = get_state_summary()
@@ -123,26 +123,36 @@ async def cmd_status():
     from app.notify import _get_disk_usage
     disk = _get_disk_usage()
 
-    accounts = settings.account_list
-    total_symbols = sum(len(a.symbols) for a in accounts)
+    t = stats.totals()
+    all_st = stats.all_stats()
 
-    text = (
-        f"📋 <b>현재 상태</b> ({now:%H:%M:%S})\n\n"
-        f"<b>수집</b>\n"
-        f"  계정: {len(accounts)}개 | 종목: {total_symbols}개\n"
-        f"  에러: {_error_count}건\n"
-        f"  WS 재접속: {_ws_reconnects}회\n\n"
-        f"<b>저장공간</b>\n"
-        f"  디스크: {disk}\n\n"
-        f"<b>백업</b>\n"
-        f"  마지막 성공: {last_date}"
-        + (f" [{last_route}]" if last_route else "")
-        + f"\n  시각: {last_time[:19] if last_time else '없음'}"
-        + f"\n  밀린 날짜: {len(pending)}일"
-    )
+    lines = [f"📋 <b>현재 상태</b> ({now:%H:%M:%S})\n"]
+
+    # 계정별 수집 현황
+    for name, s in all_st.items():
+        lines.append(f"<b>[{name}]</b>")
+        lines.append(f"  체결: {s.trade_count:,} | 호가: {s.orderbook_count:,}")
+        lines.append(f"  회원사: {s.member_count:,} | 시세: {s.daily_base_count:,} | 투자자: {s.investor_count:,}")
+        lines.append(f"  WS재접속: {s.ws_reconnects} | 에러: {s.errors}")
+
+    # 합계
+    lines.append(f"\n<b>합계</b>")
+    lines.append(f"  체결: {t.trade_count:,} | 호가: {t.orderbook_count:,}")
+    lines.append(f"  WS재접속: {t.ws_reconnects} | 에러: {t.errors}")
+
+    lines.append(f"\n<b>저장공간</b>")
+    lines.append(f"  디스크: {disk}")
+
+    lines.append(f"\n<b>백업</b>")
+    lines.append(f"  마지막 성공: {last_date}"
+                 + (f" [{last_route}]" if last_route else ""))
+    lines.append(f"  시각: {last_time[:19] if last_time else '없음'}")
+    pending_text = f"  밀린 날짜: {len(pending)}일"
     if len(pending) > 1:
-        text += f" ({pending[0]} ~ {pending[-1]})"
-    await notify.send(text)
+        pending_text += f" ({pending[0]} ~ {pending[-1]})"
+    lines.append(pending_text)
+
+    await notify.send("\n".join(lines))
 
 
 @bot.command("/help")
