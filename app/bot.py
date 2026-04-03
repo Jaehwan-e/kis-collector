@@ -130,6 +130,7 @@ async def cmd_status():
     # 합계
     lines.append(f"\n<b>합계</b>")
     lines.append(f"  체결: {t.trade_count:,} | 호가: {t.orderbook_count:,}")
+    lines.append(f"  회원사: {t.member_count:,} | 시세: {t.daily_base_count:,} | 투자자: {t.investor_count:,}")
     lines.append(f"  WS재접속: {t.ws_reconnects} | 에러: {t.errors}")
 
     lines.append(f"\n<b>저장공간</b>")
