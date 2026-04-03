@@ -2,6 +2,7 @@
 .tokens.json
 .tokens_*.json
 .backup_state.json
+.backup_remotes.json
 .venv/
 __pycache__/
 *.pyc

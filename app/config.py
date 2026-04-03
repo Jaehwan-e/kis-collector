@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
+from urllib.parse import urlparse, urlunparse
 
 from pydantic_settings import BaseSettings
+
+_REMOTES_OVERRIDE_FILE = os.path.join(os.path.dirname(__file__), os.pardir, ".backup_remotes.json")
 
 
 @dataclass
@@ -68,18 +72,61 @@ class Settings(BaseSettings):
 
     @property
     def backup_remote_list(self) -> list[tuple[str, str]]:
-        """'name:dsn,name:dsn' → [(name, dsn), ...]"""
+        """'name:dsn,name:dsn' → [(name, dsn), ...], IP 오버라이드 적용"""
         if not self.backup_remotes:
             return []
+        overrides = _load_ip_overrides()
         result = []
         for entry in self.backup_remotes.split(","):
             entry = entry.strip()
             if ":" in entry:
                 name, dsn = entry.split(":", 1)
-                result.append((name.strip(), dsn.strip()))
+                name = name.strip()
+                dsn = dsn.strip()
+                if name in overrides:
+                    dsn = _replace_host(dsn, overrides[name])
+                result.append((name, dsn))
         return result
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
 settings = Settings()
+
+
+def _load_ip_overrides() -> dict[str, str]:
+    if not os.path.exists(_REMOTES_OVERRIDE_FILE):
+        return {}
+    try:
+        with open(_REMOTES_OVERRIDE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_ip_override(name: str, ip: str):
+    overrides = _load_ip_overrides()
+    overrides[name] = ip
+    with open(_REMOTES_OVERRIDE_FILE, "w") as f:
+        json.dump(overrides, f, indent=2)
+
+
+def remove_ip_override(name: str) -> bool:
+    overrides = _load_ip_overrides()
+    if name not in overrides:
+        return False
+    del overrides[name]
+    with open(_REMOTES_OVERRIDE_FILE, "w") as f:
+        json.dump(overrides, f, indent=2)
+    return True
+
+
+def get_ip_overrides() -> dict[str, str]:
+    return _load_ip_overrides()
+
+
+def _replace_host(dsn: str, new_host: str) -> str:
+    parsed = urlparse(dsn)
+    # netloc = user:pass@host:port → host만 교체
+    replaced = parsed._replace(netloc=parsed.netloc.replace(parsed.hostname, new_host))
+    return urlunparse(replaced)

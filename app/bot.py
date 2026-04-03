@@ -23,10 +23,10 @@ class TelegramBot:
         self._stop = False
         self._handlers: dict[str, callable] = {}
 
-    def command(self, cmd: str):
-        """명령어 핸들러 등록 데코레이터"""
+    def command(self, cmd: str, has_args: bool = False):
+        """명령어 핸들러 등록 데코레이터. has_args=True면 메시지 텍스트를 인자로 전달."""
         def decorator(fn):
-            self._handlers[cmd] = fn
+            self._handlers[cmd] = (fn, has_args)
             return fn
         return decorator
 
@@ -64,9 +64,13 @@ class TelegramBot:
 
                     if text.startswith("/"):
                         cmd = text.split()[0].split("@")[0]  # /backup@botname → /backup
-                        handler = self._handlers.get(cmd)
-                        if handler:
-                            asyncio.create_task(handler())
+                        entry = self._handlers.get(cmd)
+                        if entry:
+                            fn, has_args = entry
+                            if has_args:
+                                asyncio.create_task(fn(text))
+                            else:
+                                asyncio.create_task(fn())
                         else:
                             await notify.send(f"알 수 없는 명령어: {cmd}")
 
@@ -155,11 +159,83 @@ async def cmd_status():
     await notify.send("\n".join(lines))
 
 
+@bot.command("/remotes")
+async def cmd_remotes():
+    """백업 원격지 목록 + 현재 IP 표시"""
+    from app.config import get_ip_overrides
+    from urllib.parse import urlparse
+    remotes = settings.backup_remote_list
+    overrides = get_ip_overrides()
+
+    if not remotes:
+        await notify.send("백업 원격지 미설정")
+        return
+
+    lines = ["<b>🔗 백업 원격지</b>\n"]
+    for name, dsn in remotes:
+        parsed = urlparse(dsn)
+        ip = parsed.hostname
+        port = parsed.port
+        tag = " (수정됨)" if name in overrides else ""
+        lines.append(f"  <b>{name}</b>: {ip}:{port}{tag}")
+    lines.append(f"\n사용법: /setip [이름] [IP]")
+    lines.append(f"초기화: /resetip [이름]")
+    await notify.send("\n".join(lines))
+
+
+@bot.command("/setip", has_args=True)
+async def cmd_setip(text: str):
+    """원격지 IP 변경: /setip datalinker 1.2.3.4"""
+    from app.config import save_ip_override
+    parts = text.split()
+    if len(parts) != 3:
+        await notify.send("사용법: /setip [이름] [IP]\n예: /setip datalinker 192.168.1.100")
+        return
+
+    name = parts[1]
+    ip = parts[2]
+
+    # 등록된 원격지인지 확인
+    known = [n for n, _ in settings.backup_remote_list]
+    # 오버라이드 적용 전 원본 기준으로 확인
+    base_names = []
+    for entry in settings.backup_remotes.split(","):
+        entry = entry.strip()
+        if ":" in entry:
+            base_names.append(entry.split(":", 1)[0].strip())
+
+    if name not in base_names:
+        await notify.send(f"알 수 없는 원격지: {name}\n등록된 원격지: {', '.join(base_names)}")
+        return
+
+    save_ip_override(name, ip)
+    await notify.send(f"✅ <b>{name}</b> IP 변경: <b>{ip}</b>")
+
+
+@bot.command("/resetip", has_args=True)
+async def cmd_resetip(text: str):
+    """원격지 IP 초기화 (.env 원본으로): /resetip datalinker"""
+    from app.config import remove_ip_override
+    parts = text.split()
+    if len(parts) != 2:
+        await notify.send("사용법: /resetip [이름]\n예: /resetip datalinker")
+        return
+
+    name = parts[1]
+    if remove_ip_override(name):
+        await notify.send(f"✅ <b>{name}</b> IP 초기화 (.env 원본 사용)")
+    else:
+        await notify.send(f"{name}은 오버라이드가 없습니다")
+
+
 @bot.command("/help")
 async def cmd_help():
     await notify.send(
         "<b>📌 명령어 목록</b>\n\n"
         "/status — 수집 + 백업 상태\n"
         "/backup — 밀린 날짜 + 오늘 전부 백업\n"
+        "/remotes — 백업 원격지 목록\n"
+        "/setip [이름] [IP] — 원격지 IP 변경\n"
+        "/resetip [이름] — IP 초기화\n"
         "/help — 명령어 목록"
     )
