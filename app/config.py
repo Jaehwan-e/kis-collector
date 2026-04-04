@@ -33,6 +33,17 @@ class Settings:
         self.telegram_chat_id: str = raw.get("telegram_chat_id", "")
         self._backup_remotes_raw = raw.get("backup_remotes", [])
 
+        # REST API 모드: "production" (초당 20건) / "test" (초당 3건)
+        self.api_mode: str = raw.get("api_mode", "production")
+        self.poll_interval: int = raw.get("poll_interval", 20)
+
+    @property
+    def rest_delay(self) -> float:
+        """종목 간 REST 호출 딜레이 (초)"""
+        if self.api_mode == "test":
+            return 0.35  # 초당 ~3건
+        return 0.05  # 초당 ~20건
+
         # 계정
         raw_accounts = raw.get("accounts", [])
         if raw_accounts:

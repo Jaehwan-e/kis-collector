@@ -112,8 +112,9 @@ class RESTPoller:
                                  rec["glob_sell_qty"], rec["glob_buy_qty"], rec["glob_net_qty"])
                 except Exception:
                     logger.exception("[%s] 회원사 폴링 실패: %s", self._name, symbol)
+                await asyncio.sleep(settings.rest_delay)
 
-            await asyncio.sleep(30)
+            await asyncio.sleep(settings.poll_interval)
 
     # -- 장 시작 전 시세 (FHKST01010100) --
 
@@ -145,6 +146,7 @@ class RESTPoller:
                             rec["lower_limit"], rec["tick_unit"], rec["listed_shares"])
             except Exception:
                 logger.exception("[%s] 일별 시세 실패: %s", self._name, symbol)
+            await asyncio.sleep(settings.rest_delay)
 
     # -- 장 마감 후 투자자 (FHKST01010900) --
 
@@ -185,6 +187,7 @@ class RESTPoller:
                             rec["frgn_net_qty"], rec["orgn_net_qty"])
             except Exception:
                 logger.exception("[%s] 일별 투자자 실패: %s", self._name, symbol)
+            await asyncio.sleep(settings.rest_delay)
 
     async def close(self):
         if self._session and not self._session.closed:
