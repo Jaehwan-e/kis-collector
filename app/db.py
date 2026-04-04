@@ -51,10 +51,13 @@ class Database:
         self._lock = asyncio.Lock()
 
     async def init(self):
+        num_accounts = len(settings.account_list)
+        min_sz = max(2, num_accounts + 1)
+        max_sz = max(10, num_accounts * 4 + 2)
         self._pool = await asyncpg.create_pool(
-            settings.db_dsn, min_size=2, max_size=10
+            settings.db_dsn, min_size=min_sz, max_size=max_sz
         )
-        logger.info("DB 커넥션 풀 생성 (min=2, max=10)")
+        logger.info("DB 커넥션 풀 생성 (min=%d, max=%d, 계정=%d)", min_sz, max_sz, num_accounts)
 
     async def close(self):
         await self.flush()

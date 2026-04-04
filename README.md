@@ -247,21 +247,38 @@ brew services stop postgresql@17
 brew services restart postgresql@17
 ```
 
-## 멀티 계정 설정
+## 설정 (config.json)
 
-여러 KIS 계정으로 종목을 나눠 수집할 수 있다.
-`.env`에 `ACCOUNTS` 환경변수를 JSON 배열로 설정하면 멀티 모드로 동작.
-설정하지 않으면 기존 `APP_KEY`/`APP_SECRET`/`SYMBOLS`로 싱글 모드 동작.
+모든 설정은 프로젝트 루트의 `config.json`에서 관리.
 
-```env
-# 싱글 모드 (기존 방식)
-APP_KEY=your_key
-APP_SECRET=your_secret
-SYMBOLS=005930,000660,...
-
-# 멀티 모드 (ACCOUNTS 설정 시 위 3개는 무시됨)
-ACCOUNTS=[{"name":"main","app_key":"KEY1","app_secret":"SEC1","symbols":"005930,000660,..."},{"name":"sub","app_key":"KEY2","app_secret":"SEC2","symbols":"035720,011200,..."}]
+```json
+{
+  "db_dsn": "postgresql://user:pass@localhost:5432/stock_data",
+  "ws_url": "ws://ops.koreainvestment.com:21000",
+  "rest_url": "https://openapi.koreainvestment.com:9443",
+  "log_level": "INFO",
+  "flush_interval": 1.0,
+  "telegram_bot_token": "",
+  "telegram_chat_id": "",
+  "backup_remotes": "name1:postgresql://...,name2:postgresql://...",
+  "accounts": [
+    {
+      "name": "acc1",
+      "app_key": "KEY1",
+      "app_secret": "SECRET1",
+      "symbols": "005930,000660,..."
+    },
+    {
+      "name": "acc2",
+      "app_key": "KEY2",
+      "app_secret": "SECRET2",
+      "symbols": "035720,011200,..."
+    }
+  ]
+}
 ```
+
+싱글 계정일 경우 `accounts` 대신 최상위에 `app_key`, `app_secret`, `symbols`를 직접 설정.
 
 - 계정당 WS 1연결, 최대 40종목 구독 가능
 - DB, 텔레그램, 백업은 모든 계정이 공유
