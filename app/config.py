@@ -31,7 +31,7 @@ class Settings:
         self.flush_interval: float = raw.get("flush_interval", 1.0)
         self.telegram_bot_token: str = raw.get("telegram_bot_token", "")
         self.telegram_chat_id: str = raw.get("telegram_chat_id", "")
-        self.backup_remotes: str = raw.get("backup_remotes", "")
+        self._backup_remotes_raw = raw.get("backup_remotes", [])
 
         # 계정
         raw_accounts = raw.get("accounts", [])
@@ -72,19 +72,16 @@ class Settings:
 
     @property
     def backup_remote_list(self) -> list[tuple[str, str]]:
-        if not self.backup_remotes:
+        if not self._backup_remotes_raw:
             return []
         overrides = _load_ip_overrides()
         result = []
-        for entry in self.backup_remotes.split(","):
-            entry = entry.strip()
-            if ":" in entry:
-                name, dsn = entry.split(":", 1)
-                name = name.strip()
-                dsn = dsn.strip()
-                if name in overrides:
-                    dsn = _replace_host(dsn, overrides[name])
-                result.append((name, dsn))
+        for entry in self._backup_remotes_raw:
+            name = entry["name"]
+            dsn = entry["dsn"]
+            if name in overrides:
+                dsn = _replace_host(dsn, overrides[name])
+            result.append((name, dsn))
         return result
 
 

@@ -192,12 +192,8 @@ async def cmd_setip(text: str):
     name = parts[1]
     ip = parts[2]
 
-    # 오버라이드 적용 전 원본 기준으로 확인
-    base_names = []
-    for entry in settings.backup_remotes.split(","):
-        entry = entry.strip()
-        if ":" in entry:
-            base_names.append(entry.split(":", 1)[0].strip())
+    # 원본 기준으로 확인
+    base_names = [e["name"] for e in settings._backup_remotes_raw]
 
     if name not in base_names:
         await notify.send(f"알 수 없는 원격지: {name}\n등록된 원격지: {', '.join(base_names)}")
