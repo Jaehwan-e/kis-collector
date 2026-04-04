@@ -260,7 +260,10 @@ brew services restart postgresql@17
   "flush_interval": 1.0,
   "telegram_bot_token": "",
   "telegram_chat_id": "",
-  "backup_remotes": "name1:postgresql://...,name2:postgresql://...",
+  "backup_remotes": [
+    {"name": "remote1", "dsn": "postgresql://..."},
+    {"name": "remote2", "dsn": "postgresql://..."}
+  ],
   "accounts": [
     {
       "name": "acc1",
