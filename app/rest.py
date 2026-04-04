@@ -73,7 +73,7 @@ class RESTPoller:
     # -- 회원사 (FHKST01010600) --
 
     async def poll_member(self):
-        """장중(09:00~15:30) 30초 주기 폴링"""
+        """장중(09:00~15:30) poll_interval 주기 폴링"""
         while True:
             now = datetime.datetime.now(KST)
             market_start = now.replace(hour=9, minute=0, second=0, microsecond=0)
