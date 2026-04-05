@@ -97,6 +97,8 @@ async def _run_market_session(db: Database):
         await notify.send("📅 오늘 휴장 — 수집 스킵")
         await first_rest.close()
         await first_auth.close()
+        # POST_MARKET까지 대기 → 외부 루프에서 야간 대기로 전환
+        await _wait_until(POST_MARKET)
         return
 
     await first_rest.close()
