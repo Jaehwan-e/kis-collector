@@ -9,11 +9,47 @@ import aiohttp
 from .auth import AuthManager
 from .config import settings
 from .db import Database
+from . import notify
 from . import stats
 
 logger = logging.getLogger(__name__)
 
 KST = datetime.timezone(datetime.timedelta(hours=9))
+
+
+class _ErrorTracker:
+    """에러 누적 추적 — 1, 10, 100, 1000, ... 건마다 알림"""
+
+    def __init__(self):
+        self._count: int = 0
+        self._first_time: str = ""
+        self._last_msg: str = ""
+        self._next_threshold: int = 1
+
+    async def record(self, label: str, detail: str):
+        now = datetime.datetime.now(KST).strftime("%H:%M:%S")
+        self._count += 1
+        self._last_msg = detail
+        if self._count == 1:
+            self._first_time = now
+            self._next_threshold = 10
+            await notify.send_error(label, f"{now} | {detail}")
+        elif self._count >= self._next_threshold:
+            await notify.send_error(
+                f"{label} 연속 실패 {self._count}건",
+                f"{self._first_time} ~ {now} | {detail}",
+            )
+            self._next_threshold *= 10
+
+    async def clear(self, label: str):
+        if self._count > 0:
+            count = self._count
+            self._count = 0
+            self._next_threshold = 1
+            self._first_time = ""
+            self._last_msg = ""
+            if count >= 10:
+                await notify.send(f"✅ {label} 정상 복구 (에러 {count}건 발생 후)")
 
 
 class RESTPoller:
@@ -23,6 +59,9 @@ class RESTPoller:
         self._account = auth.account
         self._name = auth.account.name
         self._symbols = auth.account.symbols
+        self._member_errors = _ErrorTracker()
+        self._daily_base_errors = _ErrorTracker()
+        self._investor_errors = _ErrorTracker()
         self._session: aiohttp.ClientSession | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
@@ -112,11 +151,14 @@ class RESTPoller:
                     }
                     await self._db.insert_member(rec)
                     stats.get(self._name).member_count += 1
+                    await self._member_errors.clear(f"[{self._name}] 회원사 폴링")
                     logger.debug("[%s] 회원사 저장: %s sell=%s buy=%s glob=%d/%d/%d",
                                  self._name, symbol, sell_qtys, buy_qtys,
                                  rec["glob_sell_qty"], rec["glob_buy_qty"], rec["glob_net_qty"])
-                except Exception:
+                except Exception as e:
                     logger.exception("[%s] 회원사 폴링 실패: %s", self._name, symbol)
+                    await self._member_errors.record(
+                        f"[{self._name}] 회원사 폴링 실패", f"{symbol}: {e}")
                 await asyncio.sleep(settings.rest_delay)
 
             await asyncio.sleep(settings.poll_interval)
@@ -146,11 +188,14 @@ class RESTPoller:
                 }
                 await self._db.insert_daily_base(rec)
                 stats.get(self._name).daily_base_count += 1
+                await self._daily_base_errors.clear(f"[{self._name}] 일별 시세")
                 logger.info("[%s] 일별 시세 저장: %s 기준=%d 상한=%d 하한=%d 호가단위=%d 상장주수=%d",
                             self._name, symbol, rec["base_price"], rec["upper_limit"],
                             rec["lower_limit"], rec["tick_unit"], rec["listed_shares"])
-            except Exception:
+            except Exception as e:
                 logger.exception("[%s] 일별 시세 실패: %s", self._name, symbol)
+                await self._daily_base_errors.record(
+                    f"[{self._name}] 일별 시세 실패", f"{symbol}: {e}")
             await asyncio.sleep(settings.rest_delay)
 
     # -- 장 마감 후 투자자 (FHKST01010900) --
@@ -187,11 +232,14 @@ class RESTPoller:
                 }
                 await self._db.insert_daily_investor(rec)
                 stats.get(self._name).investor_count += 1
+                await self._investor_errors.clear(f"[{self._name}] 일별 투자자")
                 logger.info("[%s] 일별 투자자 저장: %s [%s] 개인=%d 외인=%d 기관=%d",
                             self._name, symbol, rec["trade_date"], rec["prsn_net_qty"],
                             rec["frgn_net_qty"], rec["orgn_net_qty"])
-            except Exception:
+            except Exception as e:
                 logger.exception("[%s] 일별 투자자 실패: %s", self._name, symbol)
+                await self._investor_errors.record(
+                    f"[{self._name}] 일별 투자자 실패", f"{symbol}: {e}")
             await asyncio.sleep(settings.rest_delay)
 
     async def close(self):
