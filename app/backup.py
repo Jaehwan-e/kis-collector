@@ -23,8 +23,9 @@ TABLES = [
 ]
 DAILY_TABLES = [
     ("rest_daily_base", "trade_date"),
-    ("rest_daily_investor", "trade_date"),
 ]
+# investor는 전일 확정 데이터로 저장되므로 별도 처리
+INVESTOR_TABLE = ("rest_daily_investor", "trade_date")
 
 
 # -- 상태 관리 --
@@ -173,7 +174,7 @@ async def _backup_single_day(target_date: datetime.date) -> tuple[bool, str | No
                 errors.append(f"{table}: {e}")
                 logger.exception("백업 실패 %s", table)
 
-        # date 기반 테이블
+        # date 기반 테이블 (당일)
         for table, date_col in DAILY_TABLES:
             try:
                 await remote.execute(
@@ -190,6 +191,27 @@ async def _backup_single_day(target_date: datetime.date) -> tuple[bool, str | No
             except Exception as e:
                 errors.append(f"{table}: {e}")
                 logger.exception("백업 실패 %s", table)
+
+        # investor (전일 확정 데이터 — 수집일 기준 전 영업일)
+        inv_table, inv_col = INVESTOR_TABLE
+        # target_date 당일에 수집된 investor의 trade_date는 전일 이하
+        # target_date와 직전 7일 범위로 포함 (주말/연휴 고려)
+        inv_start = target_date - datetime.timedelta(days=7)
+        try:
+            await remote.execute(
+                f"DELETE FROM {inv_table} WHERE {inv_col} >= $1 AND {inv_col} <= $2",
+                inv_start, target_date,
+            )
+            rows = await _copy_table(
+                local, remote, inv_table,
+                f"{inv_col} >= $1 AND {inv_col} <= $2",
+                inv_start, target_date,
+            )
+            total_rows += rows
+            logger.info("백업 %s: %d건 (%s~%s)", inv_table, rows, inv_start, target_date)
+        except Exception as e:
+            errors.append(f"{inv_table}: {e}")
+            logger.exception("백업 실패 %s", inv_table)
 
     except Exception as e:
         errors.append(f"전송 중 에러: {e}")
