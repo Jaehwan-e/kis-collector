@@ -60,22 +60,28 @@ class AuthManager:
             self._session = aiohttp.ClientSession()
         return self._session
 
-    def _today_cutoff(self) -> float:
-        """오늘 08:00 KST의 epoch 타임스탬프"""
-        import datetime
-        kst = datetime.timezone(datetime.timedelta(hours=9))
-        today_8 = datetime.datetime.now(kst).replace(
-            hour=8, minute=0, second=0, microsecond=0
-        )
-        return today_8.timestamp()
+    def _should_reissue(self, expires: float) -> bool:
+        """토큰 재발급 필요 여부 판단"""
+        import datetime as _dt
+        kst = _dt.timezone(_dt.timedelta(hours=9))
+        now = _dt.datetime.now(kst)
+        # 08시대면 무조건 재발급
+        if now.hour == 8:
+            return True
+        # 만료 시각이 오늘 18:00 이전이면 재발급
+        today_18 = now.replace(hour=18, minute=0, second=0, microsecond=0)
+        return expires < today_18.timestamp()
 
     async def ensure_tokens(self):
-        """유효한 토큰 확보 — 만료가 오늘 08:00 이후면 재사용, 아니면 재발급"""
-        cutoff = self._today_cutoff()
-        if not self._approval_key or self._approval_expires < cutoff:
+        """유효한 토큰 확보 — 만료가 당일 18:00까지 유효하면 재사용, 아니면 재발급"""
+        if not self._approval_key or self._should_reissue(self._approval_expires):
             await self._issue_approval_key()
-        if not self._access_token or self._access_expires < cutoff:
+        if not self._access_token or self._should_reissue(self._access_expires):
             await self._issue_access_token()
+
+    async def reissue_access_token(self):
+        """토큰 만료 시 외부에서 호출하는 재발급"""
+        await self._issue_access_token()
 
     async def force_issue_approval_key(self):
         """WS 재접속 시 강제로 새 approval_key 발급"""

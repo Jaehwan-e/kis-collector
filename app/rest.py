@@ -31,21 +31,26 @@ class RESTPoller:
         return self._session
 
     async def _request(self, path: str, tr_id: str, params: dict) -> dict:
-        token = self._auth.access_token
-        session = await self._get_session()
-        headers = {
-            "content-type": "application/json; charset=utf-8",
-            "authorization": f"Bearer {token}",
-            "appkey": self._account.app_key,
-            "appsecret": self._account.app_secret,
-            "tr_id": tr_id,
-        }
-        url = f"{settings.rest_url}{path}"
-        async with session.get(url, headers=headers, params=params) as resp:
-            data = await resp.json()
-            if resp.status != 200:
-                raise RuntimeError(f"REST 요청 실패: {resp.status} {data}")
-            return data
+        for attempt in range(2):
+            token = self._auth.access_token
+            session = await self._get_session()
+            headers = {
+                "content-type": "application/json; charset=utf-8",
+                "authorization": f"Bearer {token}",
+                "appkey": self._account.app_key,
+                "appsecret": self._account.app_secret,
+                "tr_id": tr_id,
+            }
+            url = f"{settings.rest_url}{path}"
+            async with session.get(url, headers=headers, params=params) as resp:
+                data = await resp.json()
+                if data.get("msg_cd") == "EGW00123" and attempt == 0:
+                    logger.warning("[%s] 토큰 만료 — 자동 재발급", self._name)
+                    await self._auth.reissue_access_token()
+                    continue
+                if resp.status != 200:
+                    raise RuntimeError(f"REST 요청 실패: {resp.status} {data}")
+                return data
 
     # -- 휴장일 조회 (CTCA0903R) --
 
