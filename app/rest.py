@@ -51,7 +51,7 @@ class RESTPoller:
 
     async def is_market_open(self, date: datetime.date | None = None) -> bool:
         """오늘(또는 지정일)이 개장일인지 조회 (1일 1회만 호출)"""
-        dt = date or datetime.date.today()
+        dt = date or datetime.datetime.now(KST).date()
         data = await self._request(
             "/uapi/domestic-stock/v1/quotations/chk-holiday",
             "CTCA0903R",
@@ -171,7 +171,7 @@ class RESTPoller:
                 trade_date = (
                     datetime.date(int(bsop_date[:4]), int(bsop_date[4:6]), int(bsop_date[6:8]))
                     if len(bsop_date) == 8
-                    else datetime.date.today()
+                    else datetime.datetime.now(KST).date()
                 )
                 rec = {
                     "trade_date": trade_date,

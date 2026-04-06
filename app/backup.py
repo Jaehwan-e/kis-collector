@@ -64,7 +64,7 @@ def get_state_summary() -> dict:
 def _get_pending_dates() -> list[datetime.date]:
     """마지막 성공 이후 ~ 오늘까지 밀린 날짜 목록"""
     last = get_last_success_date()
-    today = datetime.date.today()
+    today = datetime.datetime.now(KST).date()
     if not last or last >= today:
         return [today]
     dates = []
