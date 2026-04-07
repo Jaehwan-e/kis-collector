@@ -75,17 +75,6 @@ async def _run_account_session(auth: AuthManager, db: Database):
         await auth.close()
 
 
-async def _issue_all_tokens(accounts: list[AccountConfig]) -> list[AuthManager]:
-    """모든 계정의 토큰을 일괄 발급"""
-    auths = []
-    for acc in accounts:
-        auth = AuthManager(acc)
-        await auth.ensure_tokens()
-        logger.info("[%s] 토큰 발급 완료 (%d종목)", acc.name, len(acc.symbols))
-        auths.append(auth)
-    return auths
-
-
 async def _run_market_session(db: Database):
     """하루 장중 세션: 모든 계정 동시 실행"""
     stats.reset_all()
@@ -93,21 +82,31 @@ async def _run_market_session(db: Database):
     accounts = settings.account_list
     total_symbols = sum(len(a.symbols) for a in accounts)
 
-    # 1) 장 시작 전: 토큰 일괄 발급 + 휴장일 체크
+    # 1) 08:00까지 대기
     await _wait_until(PRE_MARKET)
 
-    auths = await _issue_all_tokens(accounts)
+    # 2) 첫 번째 계정만 발급 → 휴장일 체크
+    first_auth = AuthManager(accounts[0])
+    await first_auth.ensure_tokens()
+    logger.info("[%s] 토큰 발급 완료", accounts[0].name)
 
-    first_rest = RESTPoller(auths[0], db)
+    first_rest = RESTPoller(first_auth, db)
     if not await first_rest.is_market_open():
         logger.info("오늘 휴장 — 수집 스킵")
         await notify.send("📅 오늘 휴장 — 수집 스킵")
         await first_rest.close()
-        for a in auths:
-            await a.close()
+        await first_auth.close()
         await _wait_until(POST_MARKET)
         return
     await first_rest.close()
+
+    # 3) 개장일 — 나머지 계정 토큰 발급
+    auths = [first_auth]
+    for acc in accounts[1:]:
+        auth = AuthManager(acc)
+        await auth.ensure_tokens()
+        logger.info("[%s] 토큰 발급 완료", acc.name)
+        auths.append(auth)
 
     if settings.is_multi_account:
         await notify.send_startup_multi(accounts)
