@@ -239,6 +239,9 @@ async def _backup_single_day(target_date: datetime.date) -> tuple[bool, str | No
         return True, route
 
 
+BATCH_SIZE = 5000
+
+
 async def _copy_table(
     local: asyncpg.Connection,
     remote: asyncpg.Connection,
@@ -246,7 +249,7 @@ async def _copy_table(
     where: str,
     *args,
 ) -> int:
-    """로컬에서 조회 → 원격에 INSERT"""
+    """로컬에서 조회 → 원격에 배치 INSERT"""
     rows = await local.fetch(f"SELECT * FROM {table} WHERE {where}", *args)
     if not rows:
         return 0
@@ -255,7 +258,11 @@ async def _copy_table(
     placeholders = ", ".join(f"${i+1}" for i in range(len(columns)))
     insert_sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})"
 
-    await remote.executemany(insert_sql, [tuple(r.values()) for r in rows])
+    data = [tuple(r.values()) for r in rows]
+    for i in range(0, len(data), BATCH_SIZE):
+        batch = data[i:i + BATCH_SIZE]
+        await remote.executemany(insert_sql, batch)
+        await asyncio.sleep(0)  # 이벤트 루프 양보
     return len(rows)
 
 
