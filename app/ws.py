@@ -75,6 +75,20 @@ class WSClient:
         async for raw in ws:
             if self._stop:
                 break
+            # JSON 응답(구독 확인/에러)은 로깅
+            if raw.startswith("{"):
+                try:
+                    resp = json.loads(raw)
+                    header = resp.get("header", {})
+                    tr_id = header.get("tr_id", "")
+                    msg_cd = resp.get("body", {}).get("rt_cd", "")
+                    msg1 = resp.get("body", {}).get("msg1", "")
+                    if msg_cd != "0":
+                        logger.warning("[%s] 구독 응답 실패: %s %s %s", self._name, tr_id, msg_cd, msg1)
+                    else:
+                        logger.debug("[%s] 구독 응답: %s %s", self._name, tr_id, msg1)
+                except Exception:
+                    pass
             parsed = parse_message(raw)
             if parsed is None:
                 continue

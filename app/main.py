@@ -33,10 +33,12 @@ async def _wait_until(target: datetime.time):
         await asyncio.sleep(30)
 
 
-async def _run_account_session(account: AccountConfig, db: Database):
+async def _run_account_session(account: AccountConfig, db: Database,
+                               auth: AuthManager | None = None):
     """계정 하나의 장중 세션: WS + REST 동시 실행"""
     name = account.name
-    auth = AuthManager(account)
+    if auth is None:
+        auth = AuthManager(account)
 
     logger.info("[%s] 토큰 발급 (%d종목)", name, len(account.symbols))
     await auth.ensure_tokens()
@@ -102,7 +104,7 @@ async def _run_market_session(db: Database):
         return
 
     await first_rest.close()
-    await first_auth.close()
+    # first_auth는 첫 번째 계정 세션에서 재사용 — close하지 않음
 
     if settings.is_multi_account:
         await notify.send_startup_multi(accounts)
@@ -114,10 +116,12 @@ async def _run_market_session(db: Database):
     # 2) flush 루프 (공유 DB)
     flush_task = asyncio.create_task(_flush_loop(db))
 
-    # 3) 계정별 세션 동시 실행
+    # 3) 계정별 세션 동시 실행 (첫 번째 계정은 기존 auth 재사용)
     account_tasks = [
-        asyncio.create_task(_run_account_session(acc, db))
-        for acc in accounts
+        asyncio.create_task(
+            _run_account_session(acc, db, auth=first_auth if i == 0 else None)
+        )
+        for i, acc in enumerate(accounts)
     ]
 
     try:
