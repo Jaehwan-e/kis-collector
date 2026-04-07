@@ -33,15 +33,10 @@ async def _wait_until(target: datetime.time):
         await asyncio.sleep(30)
 
 
-async def _run_account_session(account: AccountConfig, db: Database,
-                               auth: AuthManager | None = None):
+async def _run_account_session(auth: AuthManager, db: Database):
     """계정 하나의 장중 세션: WS + REST 동시 실행"""
-    name = account.name
-    if auth is None:
-        auth = AuthManager(account)
-
-    logger.info("[%s] 토큰 발급 (%d종목)", name, len(account.symbols))
-    await auth.ensure_tokens()
+    name = auth.account.name
+    symbols = auth.account.symbols
 
     rest = RESTPoller(auth, db)
     ws = WSClient(auth, db)
@@ -80,6 +75,17 @@ async def _run_account_session(account: AccountConfig, db: Database,
         await auth.close()
 
 
+async def _issue_all_tokens(accounts: list[AccountConfig]) -> list[AuthManager]:
+    """모든 계정의 토큰을 일괄 발급"""
+    auths = []
+    for acc in accounts:
+        auth = AuthManager(acc)
+        await auth.ensure_tokens()
+        logger.info("[%s] 토큰 발급 완료 (%d종목)", acc.name, len(acc.symbols))
+        auths.append(auth)
+    return auths
+
+
 async def _run_market_session(db: Database):
     """하루 장중 세션: 모든 계정 동시 실행"""
     stats.reset_all()
@@ -87,24 +93,21 @@ async def _run_market_session(db: Database):
     accounts = settings.account_list
     total_symbols = sum(len(a.symbols) for a in accounts)
 
-    # 1) 장 시작 전: 휴장일 체크 (첫 번째 계정으로 1회)
+    # 1) 장 시작 전: 토큰 일괄 발급 + 휴장일 체크
     await _wait_until(PRE_MARKET)
 
-    first_auth = AuthManager(accounts[0])
-    await first_auth.ensure_tokens()
-    first_rest = RESTPoller(first_auth, db)
+    auths = await _issue_all_tokens(accounts)
 
+    first_rest = RESTPoller(auths[0], db)
     if not await first_rest.is_market_open():
         logger.info("오늘 휴장 — 수집 스킵")
         await notify.send("📅 오늘 휴장 — 수집 스킵")
         await first_rest.close()
-        await first_auth.close()
-        # POST_MARKET까지 대기 → 외부 루프에서 야간 대기로 전환
+        for a in auths:
+            await a.close()
         await _wait_until(POST_MARKET)
         return
-
     await first_rest.close()
-    # first_auth는 첫 번째 계정 세션에서 재사용 — close하지 않음
 
     if settings.is_multi_account:
         await notify.send_startup_multi(accounts)
@@ -116,12 +119,10 @@ async def _run_market_session(db: Database):
     # 2) flush 루프 (공유 DB)
     flush_task = asyncio.create_task(_flush_loop(db))
 
-    # 3) 계정별 세션 동시 실행 (첫 번째 계정은 기존 auth 재사용)
+    # 3) 계정별 세션 동시 실행 (발급된 auth 전달)
     account_tasks = [
-        asyncio.create_task(
-            _run_account_session(acc, db, auth=first_auth if i == 0 else None)
-        )
-        for i, acc in enumerate(accounts)
+        asyncio.create_task(_run_account_session(auth, db))
+        for auth in auths
     ]
 
     try:
