@@ -48,8 +48,7 @@ class _ErrorTracker:
             self._next_threshold = 1
             self._first_time = ""
             self._last_msg = ""
-            if count >= 10:
-                await notify.send(f"✅ {label} 정상 복구 (에러 {count}건 발생 후)")
+            await notify.send(f"✅ {label} 정상 복구 (에러 {count}건 발생 후)")
 
 
 class RESTPoller:
