@@ -249,21 +249,28 @@ async def _copy_table(
     where: str,
     *args,
 ) -> int:
-    """로컬에서 조회 → 원격에 배치 INSERT"""
-    rows = await local.fetch(f"SELECT * FROM {table} WHERE {where}", *args)
-    if not rows:
-        return 0
+    """로컬에서 커서로 읽으며 원격에 배치 INSERT (메모리 절약)"""
+    total = 0
+    insert_sql = None
 
-    columns = list(rows[0].keys())
-    placeholders = ", ".join(f"${i+1}" for i in range(len(columns)))
-    insert_sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})"
+    async with local.transaction():
+        cursor = await local.cursor(f"SELECT * FROM {table} WHERE {where}", *args)
 
-    data = [tuple(r.values()) for r in rows]
-    for i in range(0, len(data), BATCH_SIZE):
-        batch = data[i:i + BATCH_SIZE]
-        await remote.executemany(insert_sql, batch)
-        await asyncio.sleep(0)  # 이벤트 루프 양보
-    return len(rows)
+        while True:
+            rows = await cursor.fetch(BATCH_SIZE)
+            if not rows:
+                break
+
+            if insert_sql is None:
+                columns = list(rows[0].keys())
+                placeholders = ", ".join(f"${i+1}" for i in range(len(columns)))
+                insert_sql = f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})"
+
+            await remote.executemany(insert_sql, [tuple(r.values()) for r in rows])
+            total += len(rows)
+            await asyncio.sleep(0)
+
+    return total
 
 
 async def _ensure_remote_schema(remote: asyncpg.Connection):
