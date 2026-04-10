@@ -134,6 +134,17 @@ async def run_backup(date: datetime.date | None = None):
         await run_backup_all()
 
 
+async def _ensure_remote(remote, route) -> asyncpg.Connection:
+    """원격 커넥션이 살아있는지 확인, 끊겼으면 재연결"""
+    if remote and not remote.is_closed():
+        return remote
+    logger.warning("원격 연결 끊김 — 재연결 시도")
+    new_remote, new_route = await _connect_remote()
+    if new_remote:
+        await _ensure_remote_schema(new_remote)
+    return new_remote
+
+
 async def _backup_single_day(target_date: datetime.date) -> tuple[bool, str | None]:
     """하루치 데이터를 원격 DB로 전송. (성공여부, 경로명) 반환."""
     remote, route = await _connect_remote()
@@ -160,6 +171,10 @@ async def _backup_single_day(target_date: datetime.date) -> tuple[bool, str | No
 
         for table, ts_col in TABLES:
             try:
+                remote = await _ensure_remote(remote, route)
+                if not remote:
+                    errors.append(f"{table}: 재연결 실패")
+                    continue
                 await remote.execute(
                     f"DELETE FROM {table} WHERE {ts_col} >= $1 AND {ts_col} < $2",
                     day_start_ms, day_end_ms,
@@ -178,6 +193,10 @@ async def _backup_single_day(target_date: datetime.date) -> tuple[bool, str | No
         # date 기반 테이블 (당일)
         for table, date_col in DAILY_TABLES:
             try:
+                remote = await _ensure_remote(remote, route)
+                if not remote:
+                    errors.append(f"{table}: 재연결 실패")
+                    continue
                 await remote.execute(
                     f"DELETE FROM {table} WHERE {date_col} = $1",
                     target_date,
@@ -195,21 +214,23 @@ async def _backup_single_day(target_date: datetime.date) -> tuple[bool, str | No
 
         # investor (전일 확정 데이터 — 수집일 기준 전 영업일)
         inv_table, inv_col = INVESTOR_TABLE
-        # target_date 당일에 수집된 investor의 trade_date는 전일 이하
-        # target_date와 직전 7일 범위로 포함 (주말/연휴 고려)
         inv_start = target_date - datetime.timedelta(days=7)
         try:
-            await remote.execute(
-                f"DELETE FROM {inv_table} WHERE {inv_col} >= $1 AND {inv_col} <= $2",
-                inv_start, target_date,
-            )
-            rows = await _copy_table(
-                local, remote, inv_table,
-                f"{inv_col} >= $1 AND {inv_col} <= $2",
-                inv_start, target_date,
-            )
-            total_rows += rows
-            logger.info("백업 %s: %d건 (%s~%s)", inv_table, rows, inv_start, target_date)
+            remote = await _ensure_remote(remote, route)
+            if not remote:
+                errors.append(f"{inv_table}: 재연결 실패")
+            else:
+                await remote.execute(
+                    f"DELETE FROM {inv_table} WHERE {inv_col} >= $1 AND {inv_col} <= $2",
+                    inv_start, target_date,
+                )
+                rows = await _copy_table(
+                    local, remote, inv_table,
+                    f"{inv_col} >= $1 AND {inv_col} <= $2",
+                    inv_start, target_date,
+                )
+                total_rows += rows
+                logger.info("백업 %s: %d건 (%s~%s)", inv_table, rows, inv_start, target_date)
         except Exception as e:
             errors.append(f"{inv_table}: {e}")
             logger.exception("백업 실패 %s", inv_table)

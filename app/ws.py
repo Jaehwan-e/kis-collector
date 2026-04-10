@@ -75,6 +75,9 @@ class WSClient:
         async for raw in ws:
             if self._stop:
                 break
+            # PINGPONG keepalive 무시
+            if raw == "PINGPONG" or raw.strip() == "PINGPONG":
+                continue
             # JSON 응답(구독 확인/에러)은 로깅
             if raw.startswith("{"):
                 try:
