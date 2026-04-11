@@ -69,11 +69,21 @@ sys.path.insert(0, os.path.abspath(_BASE_DIR))
 
 from app.config import settings  # noqa: E402
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
+# 로그: 콘솔 + logs/pull_backup.log 파일 동시 기록
+_LOG_DIR = os.path.abspath(os.path.join(_BASE_DIR, "logs"))
+os.makedirs(_LOG_DIR, exist_ok=True)
+_LOG_FILE = os.path.join(_LOG_DIR, "pull_backup.log")
+
+_log_format = logging.Formatter(
+    fmt="%(asctime)s %(levelname)s %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_log_format)
+_file_handler = logging.FileHandler(_LOG_FILE, encoding="utf-8")
+_file_handler.setFormatter(_log_format)
+
+logging.basicConfig(level=logging.INFO, handlers=[_console_handler, _file_handler])
 logger = logging.getLogger("pull_backup")
 
 KST = datetime.timezone(datetime.timedelta(hours=9))
@@ -387,40 +397,56 @@ async def _run(ssh_host: str, remote_path: str,
     use_state=True: 원격 상태 파일을 참조해 밀린 날짜만 자동 pull, 성공 시 상태 갱신
     use_state=False: dates 인자에 지정된 날짜만 pull (상태 파일 변경 없음)
     """
+    overall_start = time.time()
+    grand_total = 0
+    success_dates: list[datetime.date] = []
+
+    logger.info("=" * 60)
+    logger.info("Pull 백업 시작 (host=%s, mode=%s)",
+                ssh_host, "auto" if use_state else "manual")
+
     # 1) 실행 전 원격 상태 파일을 가져와 로컬에 덮어쓰기
-    #    수집 서버 push 백업이 방금 성공했다면 그 상태를 먼저 반영
     if use_state:
         state = _pull_remote_state(ssh_host, remote_path)
+        last = state.get("last_success_date", "없음")
+        logger.info("원격 마지막 성공 날짜: %s", last)
         dates = _get_pending_dates_from_state(state)
         if not dates:
             logger.info("밀린 날짜 없음 — 종료")
             return
         logger.info("밀린 날짜 %d일: %s ~ %s", len(dates), dates[0], dates[-1])
+    else:
+        logger.info("강제 모드: %d일 (%s ~ %s)", len(dates), dates[0], dates[-1])
 
     # 2) SSH 터널 생성 + DB 연결 + 날짜별 pull
-    with SSHTunnel(ssh_host):
-        remote_dsn = _build_remote_dsn()
-        logger.info("원격 DB 연결: %s", remote_dsn.split("@")[-1])
+    try:
+        with SSHTunnel(ssh_host):
+            remote_dsn = _build_remote_dsn()
+            logger.info("원격 DB 연결: %s", remote_dsn.split("@")[-1])
 
-        remote = await asyncpg.connect(remote_dsn, timeout=30)
-        local = await asyncpg.connect(settings.db_dsn, timeout=30)
+            remote = await asyncpg.connect(remote_dsn, timeout=30)
+            local = await asyncpg.connect(settings.db_dsn, timeout=30)
+            logger.info("로컬 DB 연결 완료")
 
-        success_dates: list[datetime.date] = []
-        try:
-            for d in dates:
-                logger.info("=== %s 당겨오는 중 ===", d)
-                start = time.time()
-                try:
-                    total = await _pull_single_day(remote, local, d)
-                    elapsed = time.time() - start
-                    logger.info("=== %s 완료: %d건 | %.0f초 ===", d, total, elapsed)
-                    success_dates.append(d)
-                except Exception:
-                    logger.exception("=== %s 실패 — 이후 날짜 중단 ===", d)
-                    break
-        finally:
-            await remote.close()
-            await local.close()
+            try:
+                for d in dates:
+                    logger.info("=== %s 당겨오는 중 ===", d)
+                    start = time.time()
+                    try:
+                        total = await _pull_single_day(remote, local, d)
+                        elapsed = time.time() - start
+                        logger.info("=== %s 완료: %d건 | %.0f초 ===", d, total, elapsed)
+                        success_dates.append(d)
+                        grand_total += total
+                    except Exception:
+                        logger.exception("=== %s 실패 — 이후 날짜 중단 ===", d)
+                        break
+            finally:
+                await remote.close()
+                await local.close()
+                logger.info("DB 연결 종료")
+    except Exception:
+        logger.exception("Pull 백업 중단")
 
     # 3) 성공한 날짜 중 가장 최근을 상태 파일에 기록하고 원격에 업로드
     if use_state and success_dates:
@@ -430,6 +456,17 @@ async def _run(ssh_host: str, remote_path: str,
         state["last_success_time"] = datetime.datetime.now(KST).isoformat()
         _save_local_state(state)
         _push_remote_state(ssh_host, remote_path)
+
+    # 4) 최종 요약
+    overall_elapsed = time.time() - overall_start
+    logger.info("=" * 60)
+    if success_dates:
+        logger.info("Pull 백업 종료: %d일 성공 (%s ~ %s) | 총 %d건 | %.0f초",
+                    len(success_dates), success_dates[0], success_dates[-1],
+                    grand_total, overall_elapsed)
+    else:
+        logger.warning("Pull 백업 종료: 성공한 날짜 없음 | %.0f초", overall_elapsed)
+    logger.info("=" * 60)
 
 
 def _parse_date(s: str) -> datetime.date:
