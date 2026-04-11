@@ -4,31 +4,36 @@
 포트포워딩이나 pg_hba.conf 수정 없이, SSH 터널을 통해 수집 서버의
 PostgreSQL에 접속하여 날짜 범위별로 데이터를 가져온다.
 
+수집 서버의 텔레그램 봇 push 백업과 `.backup_state.json` 파일을 공유하여
+이미 push 백업된 날짜는 건너뛰고, 밀린 날짜만 선별적으로 당겨온다.
+
 ## 동작 흐름
-1. SSH 터널 생성 (로컬 15432 포트 → 수집 서버의 127.0.0.1:5432)
-2. 로컬 15432 포트로 원격 PG에 접속 (원격 입장에서는 localhost 접속으로 보임)
-3. 날짜 범위의 데이터를 커서로 스트리밍 조회 → 로컬 PG에 배치 INSERT
-4. 완료 시 SSH 터널 자동 종료
+1. 원격 `.backup_state.json` 을 SCP로 가져와 로컬에 덮어쓰기
+2. SSH 터널 생성 (로컬 15432 포트 → 수집 서버의 127.0.0.1:5432)
+3. 마지막 성공 날짜 이후 ~ 오늘까지 날짜 계산
+4. 날짜별로 커서 스트리밍 조회 → 로컬 PG에 배치 INSERT
+5. 성공 시 `.backup_state.json` 갱신 후 원격에 다시 SCP 업로드
+6. SSH 터널 종료
 
 ## 사용법
 ```bash
-# 어제 하루치 가져오기 (기본값)
-python scripts/pull_backup.py
+# 기본: 원격 state를 참조해 밀린 날짜 자동 pull
+python scripts/pull_backup.py --ssh ubuntu@1.2.3.4
 
-# 특정 날짜 하루치
-python scripts/pull_backup.py --date 2026-04-10
-
-# 날짜 범위
-python scripts/pull_backup.py --from 2026-04-07 --to 2026-04-10
-
-# SSH 호스트 지정 (기본: config.json의 ssh_host 또는 ubuntu@collector)
+# 특정 날짜 하루치 (state 무시, 강제)
 python scripts/pull_backup.py --ssh ubuntu@1.2.3.4 --date 2026-04-10
+
+# 날짜 범위 (state 무시, 강제)
+python scripts/pull_backup.py --ssh ubuntu@1.2.3.4 --from 2026-04-07 --to 2026-04-10
+
+# 원격 프로젝트 경로 (기본: /home/ubuntu/kis-collector)
+python scripts/pull_backup.py --ssh ubuntu@1.2.3.4 --remote-path /opt/kis-collector
 ```
 
 ## 필수 조건
-- 로컬에서 수집 서버로 SSH 접속이 가능해야 함 (키 인증 권장)
-- 수집 서버의 PostgreSQL이 localhost:5432에서 리슨 중이어야 함
-- 로컬에 config.json이 있어야 함 (로컬 DB DSN 및 원격 DB 인증정보 읽음)
+- 로컬에서 수집 서버로 SSH/SCP 접속 가능 (키 인증 권장)
+- 수집 서버의 PostgreSQL이 localhost:5432에서 리슨 중
+- 로컬에 config.json (로컬 DB DSN + 원격 DB 인증정보)
 """
 from __future__ import annotations
 
@@ -77,6 +82,9 @@ BATCH_SIZE = 5000
 
 # SSH 터널에서 사용할 로컬 포트 (원격 서버의 5432를 여기로 포워딩)
 LOCAL_TUNNEL_PORT = 15432
+
+# 로컬 프로젝트 루트의 .backup_state.json (app/backup.py와 동일한 파일)
+LOCAL_STATE_FILE = os.path.abspath(os.path.join(_BASE_DIR, ".backup_state.json"))
 
 
 class SSHTunnel:
@@ -136,6 +144,96 @@ def _is_port_open(host: str, port: int) -> bool:
         return sock.connect_ex((host, port)) == 0
     finally:
         sock.close()
+
+
+# ============================================================
+# 상태 파일 (.backup_state.json) 동기화
+# ============================================================
+# app/backup.py가 관리하는 파일과 동일한 포맷을 사용한다.
+# 수집 서버에서 push 백업이 성공하면 이 파일에 last_success_date가 기록되고,
+# 로컬 pull 스크립트도 같은 파일을 읽고 써서 날짜 중복을 방지한다.
+
+def _pull_remote_state(ssh_host: str, remote_path: str) -> dict:
+    """원격 수집 서버의 .backup_state.json 을 SCP로 가져와 로컬에 덮어쓰기.
+
+    원격에 파일이 없으면 빈 dict 반환. SCP 실패는 치명적이지 않으므로
+    경고만 남기고 로컬 기존 파일을 그대로 사용한다.
+    """
+    remote_state_path = f"{remote_path.rstrip('/')}/.backup_state.json"
+    cmd = ["scp", "-q", f"{ssh_host}:{remote_state_path}", LOCAL_STATE_FILE]
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        if result.returncode == 0:
+            logger.info("원격 상태 파일 동기화 완료: %s", remote_state_path)
+        else:
+            # 파일이 없는 경우도 포함 — 초기 실행 시 정상 상황
+            stderr = result.stderr.decode().strip()
+            logger.warning("원격 상태 파일 없음 or SCP 실패: %s", stderr)
+    except subprocess.TimeoutExpired:
+        logger.warning("원격 상태 파일 SCP 타임아웃")
+
+    return _load_local_state()
+
+
+def _load_local_state() -> dict:
+    """로컬 .backup_state.json 읽기. 없으면 빈 dict."""
+    if not os.path.exists(LOCAL_STATE_FILE):
+        return {}
+    try:
+        with open(LOCAL_STATE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        logger.warning("상태 파일 파싱 실패, 빈 상태로 시작")
+        return {}
+
+
+def _save_local_state(state: dict):
+    """로컬 .backup_state.json 쓰기."""
+    with open(LOCAL_STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
+
+
+def _push_remote_state(ssh_host: str, remote_path: str):
+    """로컬 상태 파일을 원격에 SCP 업로드 (역방향 동기화).
+
+    수집 서버의 push 백업과 로컬 pull 백업이 같은 상태를 공유하려면
+    pull 성공 후 원격에도 최신 상태를 써줘야 한다.
+    """
+    remote_state_path = f"{remote_path.rstrip('/')}/.backup_state.json"
+    cmd = ["scp", "-q", LOCAL_STATE_FILE, f"{ssh_host}:{remote_state_path}"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        if result.returncode == 0:
+            logger.info("원격 상태 파일 업로드 완료")
+        else:
+            logger.warning("원격 상태 파일 업로드 실패: %s", result.stderr.decode().strip())
+    except subprocess.TimeoutExpired:
+        logger.warning("원격 상태 파일 업로드 타임아웃")
+
+
+def _get_pending_dates_from_state(state: dict) -> list[datetime.date]:
+    """상태 파일의 last_success_date 이후 ~ 오늘까지 밀린 날짜 목록.
+
+    app/backup.py의 _get_pending_dates() 와 동일한 로직.
+    """
+    today = datetime.datetime.now(KST).date()
+    last_str = state.get("last_success_date")
+    if not last_str:
+        return [today]
+    try:
+        last = datetime.date.fromisoformat(last_str)
+    except ValueError:
+        return [today]
+
+    if last >= today:
+        return [today]
+
+    dates = []
+    d = last + datetime.timedelta(days=1)
+    while d <= today:
+        dates.append(d)
+        d += datetime.timedelta(days=1)
+    return dates
 
 
 def _build_remote_dsn() -> str:
@@ -269,8 +367,24 @@ async def _pull_single_day(remote: asyncpg.Connection, local: asyncpg.Connection
     return total
 
 
-async def _run(ssh_host: str, dates: list[datetime.date]):
-    """메인 실행 함수: SSH 터널 → 양쪽 DB 연결 → 날짜별 순차 당겨오기"""
+async def _run(ssh_host: str, remote_path: str,
+               dates: list[datetime.date] | None, use_state: bool):
+    """메인 실행 함수: 상태 동기화 → SSH 터널 → DB 연결 → 날짜별 pull → 상태 업로드.
+
+    use_state=True: 원격 상태 파일을 참조해 밀린 날짜만 자동 pull, 성공 시 상태 갱신
+    use_state=False: dates 인자에 지정된 날짜만 pull (상태 파일 변경 없음)
+    """
+    # 1) 실행 전 원격 상태 파일을 가져와 로컬에 덮어쓰기
+    #    수집 서버 push 백업이 방금 성공했다면 그 상태를 먼저 반영
+    if use_state:
+        state = _pull_remote_state(ssh_host, remote_path)
+        dates = _get_pending_dates_from_state(state)
+        if not dates:
+            logger.info("밀린 날짜 없음 — 종료")
+            return
+        logger.info("밀린 날짜 %d일: %s ~ %s", len(dates), dates[0], dates[-1])
+
+    # 2) SSH 터널 생성 + DB 연결 + 날짜별 pull
     with SSHTunnel(ssh_host):
         remote_dsn = _build_remote_dsn()
         logger.info("원격 DB 연결: %s", remote_dsn.split("@")[-1])
@@ -278,16 +392,31 @@ async def _run(ssh_host: str, dates: list[datetime.date]):
         remote = await asyncpg.connect(remote_dsn, timeout=30)
         local = await asyncpg.connect(settings.db_dsn, timeout=30)
 
+        success_dates: list[datetime.date] = []
         try:
             for d in dates:
                 logger.info("=== %s 당겨오는 중 ===", d)
                 start = time.time()
-                total = await _pull_single_day(remote, local, d)
-                elapsed = time.time() - start
-                logger.info("=== %s 완료: %d건 | %.0f초 ===", d, total, elapsed)
+                try:
+                    total = await _pull_single_day(remote, local, d)
+                    elapsed = time.time() - start
+                    logger.info("=== %s 완료: %d건 | %.0f초 ===", d, total, elapsed)
+                    success_dates.append(d)
+                except Exception:
+                    logger.exception("=== %s 실패 — 이후 날짜 중단 ===", d)
+                    break
         finally:
             await remote.close()
             await local.close()
+
+    # 3) 성공한 날짜 중 가장 최근을 상태 파일에 기록하고 원격에 업로드
+    if use_state and success_dates:
+        state = _load_local_state()
+        state["last_success_date"] = success_dates[-1].isoformat()
+        state["last_success_route"] = "pull"
+        state["last_success_time"] = datetime.datetime.now(KST).isoformat()
+        _save_local_state(state)
+        _push_remote_state(ssh_host, remote_path)
 
 
 def _parse_date(s: str) -> datetime.date:
@@ -308,25 +437,30 @@ def _date_range(start: datetime.date, end: datetime.date) -> list[datetime.date]
 def main():
     parser = argparse.ArgumentParser(description="수집 서버에서 로컬 DB로 데이터 당겨오기")
     parser.add_argument("--ssh", required=True, help="SSH 접속 호스트 (예: ubuntu@1.2.3.4)")
-    parser.add_argument("--date", type=_parse_date, help="특정 날짜 (YYYY-MM-DD)")
-    parser.add_argument("--from", dest="start", type=_parse_date, help="시작 날짜")
-    parser.add_argument("--to", dest="end", type=_parse_date, help="종료 날짜")
+    parser.add_argument("--remote-path", default="/home/ubuntu/kis-collector",
+                        help="원격 프로젝트 경로 (기본: /home/ubuntu/kis-collector)")
+    parser.add_argument("--date", type=_parse_date, help="특정 날짜 강제 pull (상태 무시)")
+    parser.add_argument("--from", dest="start", type=_parse_date, help="시작 날짜 (상태 무시)")
+    parser.add_argument("--to", dest="end", type=_parse_date, help="종료 날짜 (상태 무시)")
     args = parser.parse_args()
 
-    # 날짜 인자 처리: --date 단일, 또는 --from/--to 범위, 또는 기본값(어제)
+    # 날짜 인자 처리
+    # - 인자 없음: 원격 .backup_state.json 참조해 밀린 날짜 자동 pull
+    # - --date: 단일 날짜 강제 pull (상태 파일 무시/미갱신)
+    # - --from/--to: 범위 강제 pull (상태 파일 무시/미갱신)
     if args.date:
         dates = [args.date]
+        use_state = False
     elif args.start and args.end:
         dates = _date_range(args.start, args.end)
+        use_state = False
     elif args.start or args.end:
         parser.error("--from 과 --to 는 함께 사용해야 합니다")
     else:
-        # 기본값: 어제 하루치
-        yesterday = datetime.datetime.now(KST).date() - datetime.timedelta(days=1)
-        dates = [yesterday]
-        logger.info("날짜 미지정 → 어제(%s) 당겨옴", yesterday)
+        dates = None
+        use_state = True
 
-    asyncio.run(_run(args.ssh, dates))
+    asyncio.run(_run(args.ssh, args.remote_path, dates, use_state))
 
 
 if __name__ == "__main__":
