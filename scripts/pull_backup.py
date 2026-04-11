@@ -18,16 +18,29 @@ PostgreSQL에 접속하여 날짜 범위별로 데이터를 가져온다.
 ## 사용법
 ```bash
 # 기본: 원격 state를 참조해 밀린 날짜 자동 pull
-python scripts/pull_backup.py --ssh ubuntu@1.2.3.4
+# (~/.ssh/config의 Oracle_cloud 호스트 별칭 사용)
+python scripts/pull_backup.py
 
 # 특정 날짜 하루치 (state 무시, 강제)
-python scripts/pull_backup.py --ssh ubuntu@1.2.3.4 --date 2026-04-10
+python scripts/pull_backup.py --date 2026-04-10
 
 # 날짜 범위 (state 무시, 강제)
-python scripts/pull_backup.py --ssh ubuntu@1.2.3.4 --from 2026-04-07 --to 2026-04-10
+python scripts/pull_backup.py --from 2026-04-07 --to 2026-04-10
 
-# 원격 프로젝트 경로 (기본: /home/ubuntu/kis-collector)
-python scripts/pull_backup.py --ssh ubuntu@1.2.3.4 --remote-path /opt/kis-collector
+# 다른 SSH 호스트 사용
+python scripts/pull_backup.py --ssh ubuntu@1.2.3.4
+
+# 원격 프로젝트 경로 변경 (기본: /home/ubuntu/kis-collector)
+python scripts/pull_backup.py --remote-path /opt/kis-collector
+```
+
+## 사전 설정 (~/.ssh/config)
+```
+Host Oracle_cloud
+  HostName 158.179.168.237
+  IdentityFile ~/.ssh/oc_ssh.key
+  Port 22
+  User ubuntu
 ```
 
 ## 필수 조건
@@ -436,7 +449,8 @@ def _date_range(start: datetime.date, end: datetime.date) -> list[datetime.date]
 
 def main():
     parser = argparse.ArgumentParser(description="수집 서버에서 로컬 DB로 데이터 당겨오기")
-    parser.add_argument("--ssh", required=True, help="SSH 접속 호스트 (예: ubuntu@1.2.3.4)")
+    parser.add_argument("--ssh", default="Oracle_cloud",
+                        help="SSH 접속 호스트 (~/.ssh/config 별칭, 기본: Oracle_cloud)")
     parser.add_argument("--remote-path", default="/home/ubuntu/kis-collector",
                         help="원격 프로젝트 경로 (기본: /home/ubuntu/kis-collector)")
     parser.add_argument("--date", type=_parse_date, help="특정 날짜 강제 pull (상태 무시)")
