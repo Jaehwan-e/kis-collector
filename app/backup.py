@@ -241,7 +241,7 @@ async def _backup_single_day(target_date: datetime.date) -> tuple[bool, str | No
     finally:
         if local and not local.is_closed():
             await local.close()
-        if not remote.is_closed():
+        if remote and not remote.is_closed():
             await remote.close()
 
     elapsed = time.time() - start
