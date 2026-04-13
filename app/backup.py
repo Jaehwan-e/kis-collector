@@ -105,13 +105,25 @@ async def _connect_remote() -> tuple[asyncpg.Connection, str] | tuple[None, None
 # -- 백업 실행 --
 
 async def run_backup_all():
-    """밀린 날짜 전부 + 오늘 데이터 백업"""
+    """밀린 날짜 전부 + 오늘 데이터 백업.
+
+    어떤 날짜 하나가 예외로 실패해도 프로세스가 죽지 않도록 개별 감쌈.
+    """
     dates = _get_pending_dates()
     if len(dates) > 1:
         await notify.send(f"🔄 밀린 백업 {len(dates)}일치 전송 시작\n{dates[0]} ~ {dates[-1]}")
 
     for d in dates:
-        success, route = await _backup_single_day(d)
+        try:
+            success, route = await _backup_single_day(d)
+        except Exception:
+            logger.exception("백업 날짜 %s 예외 — 이후 날짜 중단", d)
+            try:
+                await notify.send(f"⚠️ {d} 백업 예외 — 이후 중단")
+            except Exception:
+                pass
+            return
+
         if not success:
             await notify.send(f"⚠️ {d} 백업 실패 — 이후 날짜 중단")
             return

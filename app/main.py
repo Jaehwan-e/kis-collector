@@ -154,10 +154,19 @@ async def _run_market_session(db: Database):
     daily_stats["total_symbols"] = total_symbols
     await notify.send_daily_report(daily_stats)
 
-    # 5) 자동 백업
+    # 5) 자동 백업 — 예외가 상위로 전파되어 프로세스가 죽지 않도록 방어
     if settings.backup_remote_list:
         logger.info("자동 백업 시작")
-        await run_backup_all()
+        try:
+            await run_backup_all()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("자동 백업 중 예외 발생 — 세션은 정상 종료")
+            try:
+                await notify.send_error("자동 백업 예외", "로그 참고")
+            except Exception:
+                pass
 
 
 async def _collect_daily_stats(db: Database, start_time: str, end_time: str) -> dict:
@@ -246,7 +255,21 @@ async def main():
                     await asyncio.sleep(30)
                 continue
 
-            await _run_market_session(db)
+            # 세션 내부 예외로 프로세스가 죽지 않도록 방어
+            # CancelledError(정상 종료 신호)만 상위로 재전파
+            try:
+                await _run_market_session(db)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("장중 세션 예외 발생 — 다음 영업일로 대기")
+                try:
+                    await notify.send_error("세션 예외", "로그 참고")
+                except Exception:
+                    pass
+                # 장 마감 시간까지 대기하여 외부 루프의 야간 대기 분기로 전환
+                while datetime.datetime.now(KST).time() < POST_MARKET:
+                    await asyncio.sleep(30)
     except asyncio.CancelledError:
         logger.info("종료 처리 중...")
     finally:
