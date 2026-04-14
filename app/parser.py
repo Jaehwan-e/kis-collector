@@ -177,6 +177,26 @@ def _parse_trade(fields: list[str]) -> dict | None:
 
     raw = {name: fields[i] for i, name in enumerate(TRADE_FIELDS)}
 
+    # 진단용: 마감 단일가(15:20~15:30) raw 필드 기록
+    #   trade_dir='' 케이스 원인 파악 — KIS가 보내는 실제 값 확인
+    cntg_hour = raw.get("stck_cntg_hour", "")
+    if "152000" <= cntg_hour <= "153059":
+        logger.info(
+            "CLOSE_AUCTION raw symbol=%s time=%s ccld_dvsn='%s' mkop='%s' hour_cls='%s' price=%s vol=%s ask1=%s bid1=%s",
+            raw.get("mksc_shrn_iscd"), cntg_hour, raw.get("ccld_dvsn"),
+            raw.get("new_mkop_cls_code"), raw.get("hour_cls_code"),
+            raw.get("stck_prpr"), raw.get("cntg_vol"),
+            raw.get("askp1"), raw.get("bidp1"),
+        )
+
+    # 진단용: 장전(08:30~09:00) trade_dir='3' 원인
+    if raw.get("ccld_dvsn") not in ("1", "5"):
+        logger.info(
+            "NONSTD_DIR raw symbol=%s time=%s ccld_dvsn='%s' mkop='%s' hour_cls='%s'",
+            raw.get("mksc_shrn_iscd"), cntg_hour, raw.get("ccld_dvsn"),
+            raw.get("new_mkop_cls_code"), raw.get("hour_cls_code"),
+        )
+
     try:
         return {
             "_type": "trade",

@@ -84,7 +84,7 @@ PostgreSQL + TimescaleDB에 저장.
 
 ### 3. rest_member — 회원사별 매매동향 (REST FHKST01010600)
 
-30초 주기 폴링, 장중(09:00~15:30). TimescaleDB 하이퍼테이블.
+20초 주기 폴링(`poll_interval`), 장중(09:00~15:30). 종목별 순회 + `rest_delay` 때문에 실효 주기는 `20s + (계정당 종목수 × rest_delay)`. TimescaleDB 하이퍼테이블.
 
 | 컬럼 | 타입 | API 필드 | 설명 |
 |------|------|----------|------|
@@ -99,6 +99,7 @@ PostgreSQL + TimescaleDB에 저장.
 - API endpoint: `/uapi/domestic-stock/v1/quotations/inquire-member`
 - `output`은 단일 객체를 담은 리스트 (output[0]에서 추출)
 - 회원사 번호/이름은 저장하지 않음 (딥러닝 피처로 수량만 사용)
+- **주의**: `sell_qtys/buy_qtys`는 **전체 회원사 중 상위 5개** (국내+외국 포함), `glob_*`는 **외국계 회원사만의 합계**. 서로 다른 집합이라 `sum(sell_qtys[1:5]) ≤ glob_sell_qty` 관계는 성립하지 않음 (99.7% 위반 확인됨). 피처로 쓸 때 "glob_net_qty = 외국계 순매수"로 해석해야 함.
 
 ### 4. rest_daily_base — 일별 기준시세 (REST FHKST01010100)
 

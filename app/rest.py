@@ -18,13 +18,21 @@ KST = datetime.timezone(datetime.timedelta(hours=9))
 
 
 class _ErrorTracker:
-    """에러 누적 추적 — 1, 10, 100, 1000, ... 건마다 알림"""
+    """에러 누적 추적.
+
+    노이즈 억제를 위해 첫 알림은 MIN_NOTIFY 건 이상부터.
+    1-2건 찍고 바로 복구되는 단발성 에러에는 텔레그램 발송하지 않음.
+    이후는 10, 100, 1000... 건마다 알림.
+    """
+
+    MIN_NOTIFY: int = 3  # 연속 N건 이상부터 첫 알림
 
     def __init__(self):
         self._count: int = 0
         self._first_time: str = ""
         self._last_msg: str = ""
-        self._next_threshold: int = 1
+        self._next_threshold: int = self.MIN_NOTIFY
+        self._notified: bool = False  # 텔레그램 알림 이미 보냈는지
 
     async def record(self, label: str, detail: str):
         now = datetime.datetime.now(KST).strftime("%H:%M:%S")
@@ -32,23 +40,33 @@ class _ErrorTracker:
         self._last_msg = detail
         if self._count == 1:
             self._first_time = now
-            self._next_threshold = 10
-            await notify.send_error(label, f"{now} | {detail}")
-        elif self._count >= self._next_threshold:
-            await notify.send_error(
-                f"{label} 연속 실패 {self._count}건",
-                f"{self._first_time} ~ {now} | {detail}",
-            )
-            self._next_threshold *= 10
+        if self._count >= self._next_threshold:
+            if not self._notified:
+                await notify.send_error(
+                    f"{label} 연속 실패 {self._count}건",
+                    f"{self._first_time} ~ {now} | {detail}",
+                )
+                self._notified = True
+                self._next_threshold = 10
+            else:
+                await notify.send_error(
+                    f"{label} 연속 실패 {self._count}건",
+                    f"{self._first_time} ~ {now} | {detail}",
+                )
+                self._next_threshold *= 10
 
     async def clear(self, label: str):
         if self._count > 0:
             count = self._count
+            notified = self._notified
             self._count = 0
-            self._next_threshold = 1
+            self._next_threshold = self.MIN_NOTIFY
             self._first_time = ""
             self._last_msg = ""
-            await notify.send(f"✅ {label} 정상 복구 (에러 {count}건 발생 후)")
+            self._notified = False
+            # 텔레그램 알림 보낸 적 있을 때만 복구 메시지 발송
+            if notified:
+                await notify.send(f"✅ {label} 정상 복구 (에러 {count}건 발생 후)")
 
 
 class RESTPoller:
@@ -114,6 +132,10 @@ class RESTPoller:
         return is_open
 
     # -- 회원사 (FHKST01010600) --
+    # 필드 의미 주의:
+    #   total_seln_qty{1~5} / total_shnu_qty{1~5}: 전체 회원사 중 상위 5개 매도/매수 누적
+    #   glob_* prefix: "global" = 외국계 회원사만의 누적 (전체가 아님)
+    #   → glob_net_qty는 외국계 순매수이며, 전체 시장 순매수가 아님
 
     async def poll_member(self):
         """장중(09:00~15:30) poll_interval 주기 폴링"""
@@ -148,6 +170,18 @@ class RESTPoller:
                         "glob_buy_qty": int(out.get("glob_total_shnu_qty") or 0),
                         "glob_net_qty": int(out.get("glob_ntby_qty") or 0),
                     }
+                    # 진단용: 전부 0으로 들어온 케이스는 API raw 응답을 INFO로 기록
+                    #   (030200, 006400 등의 원인 파악)
+                    if (rec["glob_sell_qty"] == 0 and rec["glob_buy_qty"] == 0
+                            and sum(sell_qtys) == 0 and sum(buy_qtys) == 0):
+                        rt_cd = data.get("rt_cd", "?")
+                        msg_cd = data.get("msg_cd", "?")
+                        msg1 = data.get("msg1", "?")
+                        logger.info(
+                            "[%s] inquire-member ALL_ZERO symbol=%s rt_cd=%s msg_cd=%s msg=%s out_keys=%s",
+                            self._name, symbol, rt_cd, msg_cd, msg1,
+                            sorted(out.keys())[:20] if out else "<empty>"
+                        )
                     await self._db.insert_member(rec)
                     stats.get(self._name).member_count += 1
                     await self._member_errors.clear(f"[{self._name}] 회원사 폴링")
