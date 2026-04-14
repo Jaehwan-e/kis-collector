@@ -15,7 +15,7 @@ macOS Homebrew: `/opt/homebrew/var/postgresql@17/pg_hba.conf`
 echo 'host [DB명] [유저] [IP]/32 md5' >> /opt/homebrew/var/postgresql@17/pg_hba.conf
 
 # 예시: 158.179.168.237에서 gyeol 유저로 stock_data 접속 허용
-echo 'host stock_data gyeol 158.179.168.237/32 md5' >> /opt/homebrew/var/postgresql@17/pg_hba.conf
+echo 'host stock_data gyeol 172.30.1.36/32 md5' >> /opt/homebrew/var/postgresql@17/pg_hba.conf
 
 # 예시: 모든 IP 허용
 echo 'host stock_data gyeol 0.0.0.0/0 md5' >> /opt/homebrew/var/postgresql@17/pg_hba.conf
