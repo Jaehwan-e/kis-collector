@@ -5,6 +5,7 @@ config.json
 .backup_state.json
 .backup_remotes.json
 .venv/
+.venv-ml/
 __pycache__/
 *.pyc
 .DS_Store
