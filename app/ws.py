@@ -12,6 +12,12 @@ from . import stats
 
 logger = logging.getLogger(__name__)
 
+# WS 재접속 백오프 스케줄 (초)
+# 짧은 끊김은 빠르게 재시도, 반복 실패 시 점점 길게 쉼
+# KIS 서버가 IP 차단한 경우 60초 간격 재시도는 차단을 풀지 못하므로
+# 10분, 30분, 1시간, 3시간으로 충분히 쉬어 차단 해제를 기다림
+BACKOFF_SCHEDULE = [5, 10, 20, 40, 60, 600, 1800, 3600, 10800]
+
 
 class WSClient:
     def __init__(self, auth: AuthManager, db: Database):
@@ -22,7 +28,7 @@ class WSClient:
         self._stop = False
 
     async def run(self):
-        delay = 5
+        attempt = 0  # 연속 실패 횟수 (백오프 스케줄 인덱스)
         while not self._stop:
             try:
                 # 재접속 시 새 approval_key 발급
@@ -36,20 +42,27 @@ class WSClient:
                     close_timeout=5,
                 ) as ws:
                     await self._subscribe(ws, approval_key)
-                    delay = 5
+                    attempt = 0  # 연결 성공 시 백오프 리셋
                     await self._receive_loop(ws)
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.warning("[%s] WS 연결 끊김: %s / %ds 후 재접속", self._name, e, delay)
+                idx = min(attempt, len(BACKOFF_SCHEDULE) - 1)
+                delay = BACKOFF_SCHEDULE[idx]
+                logger.warning("[%s] WS 연결 끊김: %s / %ds 후 재접속 (시도 %d회차)",
+                               self._name, e, delay, attempt + 1)
                 from . import notify
                 st = stats.get(self._name)
                 st.ws_reconnects += 1
                 st.errors += 1
+                # 60초 이상 휴식 단계부터 텔레그램 알림
                 if delay >= 60:
-                    await notify.send_error(f"[{self._name}] WS 재접속 반복", str(e)[:200])
+                    await notify.send_error(
+                        f"[{self._name}] WS 재접속 반복 ({attempt + 1}회)",
+                        f"{delay}초 휴식 후 재시도 | {str(e)[:150]}"
+                    )
                 await asyncio.sleep(delay)
-                delay = min(delay * 2, 60)
+                attempt += 1
 
         await self._db.flush()
         logger.info("[%s] WS 클라이언트 종료", self._name)
