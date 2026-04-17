@@ -88,7 +88,7 @@ class WSClient:
         async for raw in ws:
             if self._stop:
                 break
-            # PINGPONG keepalive 무시
+            # PINGPONG keepalive 무시 (문자열 or JSON 형태 둘 다)
             if raw == "PINGPONG" or raw.strip() == "PINGPONG":
                 continue
             # JSON 응답(구독 확인/에러)은 로깅
@@ -97,6 +97,9 @@ class WSClient:
                     resp = json.loads(raw)
                     header = resp.get("header", {})
                     tr_id = header.get("tr_id", "")
+                    # JSON 형태 PINGPONG 무시
+                    if tr_id == "PINGPONG":
+                        continue
                     msg_cd = resp.get("body", {}).get("rt_cd", "")
                     msg1 = resp.get("body", {}).get("msg1", "")
                     if msg_cd != "0":
