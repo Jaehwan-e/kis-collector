@@ -6,6 +6,9 @@ config.json
 .backup_remotes.json
 .venv/
 .venv-ml/
+ml/runs/
+ml/checkpoint.pt
+*.pt
 __pycache__/
 *.pyc
 .DS_Store
