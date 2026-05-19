@@ -77,16 +77,22 @@ async def send_daily_report(daily_stats: dict):
 
 
 def _get_disk_usage() -> str:
-    """디스크 사용량 (used/total, percent)"""
-    try:
-        import shutil
-        usage = shutil.disk_usage("/")
+    """디스크 사용량 (시스템 + 데이터 볼륨)"""
+    import shutil
+
+    mounts = [("시스템", "/"), ("데이터", "/mnt/data")]
+    parts = []
+    for label, path in mounts:
+        try:
+            usage = shutil.disk_usage(path)
+        except (FileNotFoundError, OSError):
+            continue
         used_gb = usage.used / (1024 ** 3)
         total_gb = usage.total / (1024 ** 3)
         pct = usage.used / usage.total * 100
-        return f"{used_gb:.1f}GB / {total_gb:.1f}GB ({pct:.0f}%)"
-    except Exception:
-        return "확인 실패"
+        parts.append(f"{label} {used_gb:.1f}GB / {total_gb:.1f}GB ({pct:.0f}%)")
+
+    return " | ".join(parts) if parts else "확인 실패"
 
 
 async def send_error(error_type: str, detail: str):
