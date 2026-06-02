@@ -100,16 +100,27 @@ async def _run_market_session(db: Database):
         return
     await first_rest.close()
 
-    # 3) 개장일 — 나머지 계정 토큰 발급
+    # 3) 개장일 — 나머지 계정 토큰 발급 (계정별 독립 실패 처리)
     auths = [first_auth]
+    successful_accs = [accounts[0]]
     for acc in accounts[1:]:
         auth = AuthManager(acc)
-        await auth.ensure_tokens()
+        try:
+            await auth.ensure_tokens()
+        except Exception as e:
+            logger.error("[%s] 토큰 발급 실패 — 이 계정 스킵: %s", acc.name, e)
+            await notify.send_error(
+                f"[{acc.name}] 토큰 발급 실패 — 이 계정 스킵",
+                str(e)[:200],
+            )
+            await auth.close()
+            continue
         logger.info("[%s] 토큰 발급 완료", acc.name)
         auths.append(auth)
+        successful_accs.append(acc)
 
     if settings.is_multi_account:
-        await notify.send_startup_multi(accounts)
+        await notify.send_startup_multi(successful_accs)
     else:
         await notify.send_startup()
 
@@ -126,7 +137,7 @@ async def _run_market_session(db: Database):
 
     try:
         results = await asyncio.gather(*account_tasks, return_exceptions=True)
-        for acc, result in zip(accounts, results):
+        for acc, result in zip(successful_accs, results):
             if isinstance(result, asyncio.CancelledError):
                 raise result
             elif isinstance(result, Exception):
@@ -150,8 +161,8 @@ async def _run_market_session(db: Database):
 
     # 4) 일일 보고
     daily_stats = await _collect_daily_stats(db, start_time, end_time)
-    daily_stats["account_count"] = len(accounts)
-    daily_stats["total_symbols"] = total_symbols
+    daily_stats["account_count"] = len(successful_accs)
+    daily_stats["total_symbols"] = sum(len(a.symbols) for a in successful_accs)
     await notify.send_daily_report(daily_stats)
 
     # 5) 자동 백업 — 예외가 상위로 전파되어 프로세스가 죽지 않도록 방어
