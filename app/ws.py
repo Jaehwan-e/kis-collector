@@ -13,10 +13,12 @@ from . import stats
 logger = logging.getLogger(__name__)
 
 # WS 재접속 백오프 스케줄 (초)
-# 짧은 끊김은 빠르게 재시도, 반복 실패 시 점점 길게 쉼
-# KIS 서버가 IP 차단한 경우 60초 간격 재시도는 차단을 풀지 못하므로
-# 10분, 30분, 1시간, 3시간으로 충분히 쉬어 차단 해제를 기다림
-BACKOFF_SCHEDULE = [5, 10, 20, 40, 60, 600, 1800, 3600, 10800]
+# WS 태스크는 WS_START(08:30)~WS_END(15:30) 세션 내에서만 동작하고
+# WS_END에 cancel되므로 긴 휴식(분/시간 단위)은 살아있는 세션 시간만 깎아먹음.
+# 빠른 재시도 후 60초 plateau로 고정 — over-shoot로 인한 학습 데이터 손실 방지.
+BACKOFF_SCHEDULE = [5, 10, 20, 40, 60]
+# 60초 plateau 진입 후 알림 throttle: 진입 1회 + N번마다 재알림
+ALERT_THROTTLE_EVERY = 10
 
 
 class WSClient:
@@ -55,12 +57,14 @@ class WSClient:
                 st = stats.get(self._name)
                 st.ws_reconnects += 1
                 st.errors += 1
-                # 60초 이상 휴식 단계부터 텔레그램 알림
-                if delay >= 60:
-                    await notify.send_error(
-                        f"[{self._name}] WS 재접속 반복 ({attempt + 1}회)",
-                        f"{delay}초 휴식 후 재시도 | {str(e)[:150]}"
-                    )
+                # 60초 plateau 진입 후 알림: 첫 진입 + ALERT_THROTTLE_EVERY번마다
+                if delay == 60:
+                    plateau_count = attempt - (len(BACKOFF_SCHEDULE) - 1)
+                    if plateau_count == 0 or plateau_count % ALERT_THROTTLE_EVERY == 0:
+                        await notify.send_error(
+                            f"[{self._name}] WS 재접속 반복 ({attempt + 1}회)",
+                            f"{delay}초 휴식 후 재시도 | {str(e)[:150]}"
+                        )
                 await asyncio.sleep(delay)
                 attempt += 1
 
