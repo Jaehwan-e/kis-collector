@@ -95,6 +95,40 @@ def _get_disk_usage() -> str:
     return " | ".join(parts) if parts else "확인 실패"
 
 
+# 디스크 사전 경고 (임계값 초과 시 알림, mount별 throttle)
+DISK_WARN_PCT = 80.0
+DISK_CRIT_PCT = 90.0
+_DISK_ALERT_INTERVAL = datetime.timedelta(hours=6)
+_disk_alert_last: dict[str, datetime.datetime] = {}
+
+
+async def check_disk_and_alert():
+    """디스크 사용률이 임계값(80%)을 넘으면 경고. mount별로 6시간에 1번만."""
+    import shutil
+
+    now = datetime.datetime.now(KST)
+    for label, path in (("시스템", "/"), ("데이터", "/mnt/data")):
+        try:
+            usage = shutil.disk_usage(path)
+        except (FileNotFoundError, OSError):
+            continue
+        pct = usage.used / usage.total * 100
+        if pct < DISK_WARN_PCT:
+            continue
+        last = _disk_alert_last.get(path)
+        if last is not None and now - last < _DISK_ALERT_INTERVAL:
+            continue
+        _disk_alert_last[path] = now
+        free_gb = usage.free / (1024 ** 3)
+        total_gb = usage.total / (1024 ** 3)
+        icon = "🔴" if pct >= DISK_CRIT_PCT else "🟠"
+        await send(
+            f"{icon} <b>디스크 경고</b>\n"
+            f"{now:%H:%M:%S} | {label}({path}) 사용률 <b>{pct:.0f}%</b>\n"
+            f"여유 <b>{free_gb:.1f}GB</b> / {total_gb:.1f}GB"
+        )
+
+
 async def send_error(error_type: str, detail: str):
     """에러 알림"""
     now = datetime.datetime.now(KST)

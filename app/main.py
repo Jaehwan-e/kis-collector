@@ -129,6 +129,9 @@ async def _run_market_session(db: Database):
     # 2) flush 루프 (공유 DB)
     flush_task = asyncio.create_task(_flush_loop(db))
 
+    # 2-1) 디스크 감시 루프 (임계값 초과 시 사전 경고)
+    disk_task = asyncio.create_task(_disk_monitor_loop())
+
     # 3) 계정별 세션 동시 실행 (발급된 auth 전달)
     account_tasks = [
         asyncio.create_task(_run_account_session(auth, db))
@@ -150,8 +153,13 @@ async def _run_market_session(db: Database):
         raise
     finally:
         flush_task.cancel()
+        disk_task.cancel()
         try:
             await flush_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await disk_task
         except asyncio.CancelledError:
             pass
         await db.flush()
@@ -208,6 +216,16 @@ async def _flush_loop(db: Database):
     while True:
         await asyncio.sleep(settings.flush_interval)
         await db.flush()
+
+
+async def _disk_monitor_loop():
+    """10분마다 디스크 사용률 확인, 임계값 초과 시 사전 경고"""
+    while True:
+        try:
+            await notify.check_disk_and_alert()
+        except Exception:
+            logger.exception("디스크 감시 실패")
+        await asyncio.sleep(600)
 
 
 class _KSTFormatter(logging.Formatter):

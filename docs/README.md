@@ -206,7 +206,8 @@ python run.py
 ### 백그라운드 운영 (로그 파일 저장)
 
 ```bash
-mkdir -p logs && nohup python run.py > logs/realtime.log 2>&1 &
+# append(>>)로 열어야 logrotate copytruncate가 정상 동작 (> 는 fd offset이 무한 증가)
+mkdir -p logs && nohup python run.py >> logs/realtime.log 2>&1 &
 
 # 로그 실시간 확인
 tail -f logs/realtime.log
